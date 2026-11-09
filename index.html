@@ -454,7 +454,7 @@ function itemCard(t, opts = {}) {
       <button type="button" class="title">${esc(t.title)}</button>
       <button type="button" class="ibtn" aria-label="Details" aria-expanded="${isOpen}">${ICON_DOWN}</button>
     </div>
-    ${t.story ? `<div class="cstory${open.has("s:" + t.id) ? " full" : ""}"><div class="stx"><span class="tag">Story</span>${esc(t.story)}</div>${t.story.length > 95 ? `<button type="button" class="more">${open.has("s:" + t.id) ? "weniger" : "mehr"}</button>` : ""}</div>` : ""}
+    ${t.story ? `<div class="cstory${open.has("s:" + t.id) ? " full" : ""}"><div class="stx"><span class="tag">Story</span>${esc(t.story)}</div><button type="button" class="more" hidden>${open.has("s:" + t.id) ? "weniger" : "mehr"}</button></div>` : ""}
     <div class="meta">
       <span class="nr">#${t.nr}</span>
       ${opts.area && area ? `<span class="tag">${esc(area.title)}</span>` : ""}
@@ -598,7 +598,7 @@ function renderPlan(v) {
     }
     if (!items.length) grid.innerHTML = `<div class="empty">Keine Aufgaben${who || kind || $("q").value || $("hideDone").checked ? " für diesen Filter" : ""}</div>`;
     const acc = sec.querySelector(".acc");
-    acc.onclick = () => { const c = !sec.classList.contains("closed"); sec.classList.toggle("closed", c); acc.setAttribute("aria-expanded", String(!c)); c ? closed.add(a.id) : closed.delete(a.id); saveClosed(); };
+    acc.onclick = () => { const c = !sec.classList.contains("closed"); sec.classList.toggle("closed", c); acc.setAttribute("aria-expanded", String(!c)); c ? closed.add(a.id) : closed.delete(a.id); saveClosed(); if (!c) fitStories(); };
     const ob = sec.querySelector("button.owners"); if (ob) ob.onclick = () => openArea(a);
     const ab = sec.querySelector(".addarea"); if (ab) ab.onclick = () => openItem(null, { area_id: a.id });
     v.appendChild(sec);
@@ -684,6 +684,12 @@ function renderFeedback(v) {
 }
 
 /* ---------- Rendern ---------- */
+// "mehr" nur zeigen, wenn die Story wirklich über zwei Zeilen hinausgeht
+function fitStories() {
+  document.querySelectorAll(".cstory").forEach((c) => { const x = c.querySelector(".stx"), b = c.querySelector(".more");
+    b.hidden = !c.classList.contains("full") && x.scrollHeight <= x.clientHeight + 1; });
+}
+addEventListener("resize", () => { clearTimeout(fitStories.t); fitStories.t = setTimeout(fitStories, 150); });
 function chipsKind() {
   const box = $("kindChips"); box.innerHTML = "";
   for (const k of [null, ...KINDS]) {
@@ -711,6 +717,7 @@ function render() {
   else add.hidden = true;
   const v = $("view"); v.innerHTML = ""; v.className = "sect";
   ({ overview: renderOverview, plan: renderPlan, weeks: renderWeeks, feedback: renderFeedback })[view](v);
+  requestAnimationFrame(fitStories);
 }
 function jumpTo(id) {
   const t = S.items.find((x) => x.id === id); if (!t) return;
