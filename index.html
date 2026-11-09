@@ -154,8 +154,6 @@ button.title { border: 0; background: transparent; padding: 0; text-align: left;
 .ibtn[aria-expanded="true"] svg { transform: rotate(180deg); }
 .info { border-top: 1px solid var(--line2); padding-top: 8px; font-size: 13px; color: var(--soft); display: grid; gap: 7px; }
 .info b { color: var(--ink); font-weight: 600; }
-.info .story { color: var(--lav2); }
-.info .story b { color: var(--lav2); }
 .info .intern { background: var(--amberbg); color: var(--amber); border-radius: 8px; padding: 7px 9px; }
 .info .intern b { color: var(--amber); }
 .acl { margin: 3px 0 0; padding-left: 18px; display: grid; gap: 2px; }
@@ -189,8 +187,26 @@ button.jump:hover { color: var(--lav2); text-decoration: underline; }
 .addsub input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line2); border-radius: 8px; padding: 6px 9px; font-size: 13px; }
 
 .area { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: grid; gap: 12px; }
+.area.closed { gap: 0; }
+.area.closed .agrid { display: none; }
+.acc { display: inline-flex; align-items: center; gap: 8px; border: 0; background: transparent; color: var(--ink); padding: 0; text-align: left; }
+.acc svg { transition: transform .15s; color: var(--soft); flex: none; }
+.area.closed .acc svg { transform: rotate(-90deg); }
+.owners { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; border: 1px solid var(--line2); background: transparent; border-radius: 8px; padding: 3px 7px 3px 8px; font-size: 11.5px; color: var(--faint); }
+button.owners:hover { border-color: rgba(167,139,250,.55); }
+.kindhead { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; margin: 4px 0 -2px; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--soft); }
+.kindhead:first-child { margin-top: 0; }
+.kindhead span { color: var(--faint); letter-spacing: 0; }
+.cstory { font-size: 13px; color: var(--soft); line-height: 1.45; }
+.cstory .tag { background: var(--lavbg); color: var(--lav2); margin-right: 6px; font-weight: 600; }
+.cstory .stx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cstory.full .stx { display: block; }
+.cstory .more { border: 0; background: transparent; color: var(--lav2); padding: 2px 0 0; font-size: 12.5px; }
+.tag.k-abnahme { background: var(--greenbg); color: var(--green); }
+.gown { font-weight: 500; color: var(--faint); }
+.planbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .areahead { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
-.areahead h3 { margin: 0; font-size: 16px; font-weight: 700; }
+.areahead .aname { font-size: 16px; font-weight: 700; }
 .areahead .when { color: var(--faint); font-size: 12.5px; }
 .areahead .prog { flex: 1 1 200px; max-width: 360px; }
 .agrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; align-items: start; }
@@ -282,6 +298,7 @@ button.jump:hover { color: var(--lav2); text-decoration: underline; }
         <button data-view="feedback">Feedback <span class="badge" id="fbBadge" hidden></span></button>
       </div>
       <div class="chips" id="whoChips" role="group" aria-label="Wer"></div>
+      <div class="chips" id="kindChips" role="group" aria-label="Art"></div>
       <input class="search" id="q" type="search" placeholder="Suchen …" aria-label="Suchen">
       <label class="toggle"><input type="checkbox" id="hideDone"> Erledigte ausblenden</label>
       <span class="spacer"></span>
@@ -308,6 +325,12 @@ const ICON_PLUS = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" s
 let previewAs = null, realRole = null;
 let TOKEN = null, S = null, view = "overview", who = null, areaFilter = null, busy = false, editing = null, pendingShots = [];
 const open = new Set();
+const KINDS = [["story", "User Story", "User Storys"], ["orga", "Orga", "Orga"], ["abnahme", "Abnahme", "Abnahme"]];
+const kindOf = (t) => t.kind || (t.story ? "story" : "orga");
+const kindLabel = (k) => (KINDS.find((x) => x[0] === k) || KINDS[1])[1];
+let kind = null, closed = new Set();
+try { closed = new Set(JSON.parse(localStorage.getItem("pr-closed") || "[]")); } catch (e) {}
+function saveClosed() { try { localStorage.setItem("pr-closed", JSON.stringify([...closed])); } catch (e) {} }
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const iso = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
@@ -361,6 +384,7 @@ function visibleTops() {
     const subs = subsOf(t.id);
     if (who && !(t.who || []).includes(who) && !subs.some((s) => (s.who || []).includes(who))) return false;
     if (areaFilter && t.area_id !== areaFilter) return false;
+    if (kind && kindOf(t) !== kind) return false;
     if ($("hideDone").checked && isDone(t)) return false;
     if (q && ![t.title, t.descr, t.story, (t.ac || []).join(" "), t.notes, t.done_when, String(t.nr), ...subs.map((s) => s.title)].join(" ").toLowerCase().includes(q)) return false;
     return true;
@@ -400,13 +424,13 @@ function renderGantt() {
   for (const a of S.areas) {
     const [d, n] = areaProgress(a.id), p = n ? Math.round(d / n * 100) : 0;
     const now = nowW >= +a.week_from && nowW <= +a.week_to && p < 100;
-    h += `<div class="glab" data-area="${a.id}"><b>${esc(a.title)}</b><small>${esc(a.sub || "")}</small></div>
+    h += `<div class="glab" data-area="${a.id}"><b>${esc(a.title)}${(a.owners || []).length ? `<span class="gown"> · ${esc(a.owners.join(", "))}</span>` : ""}</b><small>${esc(a.sub || "")}</small></div>
       <div class="gtrack"><div class="gbar${now ? " now" : ""}${p === 100 ? " full" : ""}" style="left:${pct(+a.week_from)}%;width:${pct(+a.week_to) - pct(+a.week_from)}%" title="${esc(a.title)}: ${d} von ${n} erledigt"><i style="width:${p}%"></i></div>${line(false)}</div>
       <div class="gcnt">${d}/${n}</div>`;
   }
   const g = $("gantt"); g.innerHTML = h;
   g.querySelectorAll(".gdia").forEach((b) => b.onclick = () => openMs(S.milestones.find((m) => m.id === b.dataset.ms)));
-  g.querySelectorAll(".glab[data-area]").forEach((l) => l.onclick = () => { areaFilter = l.dataset.area; setView("plan"); });
+  g.querySelectorAll(".glab[data-area]").forEach((l) => l.onclick = () => { areaFilter = l.dataset.area; closed.delete(areaFilter); saveClosed(); setView("plan"); });
   g.querySelector(".glab[data-go]").onclick = () => setView("overview");
 }
 
@@ -430,9 +454,11 @@ function itemCard(t, opts = {}) {
       <button type="button" class="title">${esc(t.title)}</button>
       <button type="button" class="ibtn" aria-label="Details" aria-expanded="${isOpen}">${ICON_DOWN}</button>
     </div>
+    ${t.story ? `<div class="cstory${open.has("s:" + t.id) ? " full" : ""}"><div class="stx"><span class="tag">Story</span>${esc(t.story)}</div>${t.story.length > 95 ? `<button type="button" class="more">${open.has("s:" + t.id) ? "weniger" : "mehr"}</button>` : ""}</div>` : ""}
     <div class="meta">
       <span class="nr">#${t.nr}</span>
       ${opts.area && area ? `<span class="tag">${esc(area.title)}</span>` : ""}
+      ${opts.area && kindOf(t) !== "story" ? `<span class="tag k-${kindOf(t)}">${kindLabel(kindOf(t))}</span>` : ""}
       ${t.confidential ? `<span class="tag int">vertraulich</span>` : t.internal ? `<span class="tag int">nur Team</span>` : ""}
       ${t.status !== "Offen" && !done ? stPill(t.status) : ""}
       ${whoChips(t.who)}
@@ -443,7 +469,6 @@ function itemCard(t, opts = {}) {
       <div class="subrow${isDone(s) ? " done" : ""}" data-id="${s.id}">${chk(isDone(s), isDone(s) ? "Wieder öffnen" : "Abhaken", !canTick(s))}<button type="button" class="t subt">${esc(s.title)}</button>${whoChips(s.who)}${s.due ? `<span class="due${itemLate(s) ? " late" : ""}">${fmt(s.due)}</span>` : ""}</div>`).join("")}</div>` : ""}
     <div class="info" ${isOpen ? "" : "hidden"}>
       ${t.descr ? `<div>${esc(t.descr)}</div>` : ""}
-      ${t.story ? `<div class="story"><b>User Story:</b> ${esc(t.story)}</div>` : ""}
       ${(t.ac || []).length ? `<div><b>Abnahmekriterien:</b><ul class="acl">${t.ac.map((a) => `<li>${esc(a)}</li>`).join("")}</ul></div>` : ""}
       ${t.done_when ? `<div><b>Fertig wenn:</b> ${esc(t.done_when)}</div>` : ""}
       ${t.notes ? `<div><b>Hinweis:</b> ${esc(t.notes)}</div>` : ""}
@@ -454,6 +479,8 @@ function itemCard(t, opts = {}) {
   const info = el.querySelector(".info"), ib = el.querySelector(".ibtn");
   ib.onclick = () => { const o = info.hidden; info.hidden = !o; ib.setAttribute("aria-expanded", String(o)); o ? open.add(key) : open.delete(key); };
   el.querySelector(".title").onclick = () => team() ? openItem(t) : ib.click();
+  const more = el.querySelector(".cstory .more");
+  if (more) more.onclick = () => { const c = el.querySelector(".cstory"), on = !c.classList.contains("full"); c.classList.toggle("full", on); more.textContent = on ? "weniger" : "mehr"; on ? open.add("s:" + t.id) : open.delete("s:" + t.id); };
   el.querySelector(".crow .check").onclick = () => saveItem(t, { status: done ? "Offen" : "Erledigt" });
   el.querySelectorAll(".subrow").forEach((row) => {
     const s = S.items.find((x) => x.id === row.dataset.id);
@@ -542,25 +569,38 @@ function renderOverview(v) {
 
 function renderPlan(v) {
   const vis = visibleTops();
-  if (areaFilter) {
-    const a = areaOf(areaFilter);
-    const bar = document.createElement("div"); bar.className = "tools";
-    bar.innerHTML = `<span class="note">Gefiltert auf Bereich</span><button class="chip" aria-pressed="true">${esc(a ? a.title : "")} ×</button>`;
-    bar.querySelector("button").onclick = () => { areaFilter = null; render(); };
-    v.appendChild(bar);
-  }
+  const bar = document.createElement("div"); bar.className = "planbar";
+  const fa = areaFilter && areaOf(areaFilter);
+  bar.innerHTML = `${fa ? `<span class="note">Gefiltert auf Bereich</span><button class="chip" aria-pressed="true" data-x>${esc(fa.title)} ×</button><span class="spacer"></span>` : ""}
+    <button class="btn small ghost" type="button" data-all="close">Alle zuklappen</button><button class="btn small ghost" type="button" data-all="open">Alle aufklappen</button>`;
+  if (bar.querySelector("[data-x]")) bar.querySelector("[data-x]").onclick = () => { areaFilter = null; render(); };
+  bar.querySelectorAll("[data-all]").forEach((b) => b.onclick = () => { closed = b.dataset.all === "close" ? new Set(S.areas.map((a) => a.id)) : new Set(); saveClosed(); render(); });
+  v.appendChild(bar);
   for (const a of S.areas) {
     if (areaFilter && a.id !== areaFilter) continue;
     const items = vis.filter((t) => t.area_id === a.id);
     const [d, n] = areaProgress(a.id);
-    const sec = document.createElement("section"); sec.className = "area";
-    sec.innerHTML = `<div class="areahead"><h3>${esc(a.title)}</h3><span class="when">${esc(a.sub || "")} · KW ${isoWeek(weekStart(Math.floor(+a.week_from)))} bis ${isoWeek(weekStart(Math.min(weeks() - 1, Math.ceil(+a.week_to) - 1)))}</span>
+    const isClosed = closed.has(a.id);
+    const owners = a.owners || [];
+    const sec = document.createElement("section"); sec.className = "area" + (isClosed ? " closed" : "");
+    sec.innerHTML = `<div class="areahead"><button type="button" class="acc" aria-expanded="${!isClosed}">${ICON_DOWN}<span class="aname">${esc(a.title)}</span></button>
+      ${team() ? `<button type="button" class="owners" title="Hauptansprechpartner ändern">Ansprechpartner ${owners.length ? whoChips(owners) : "<em>offen</em>"}</button>` : `<span class="owners">Ansprechpartner ${whoChips(owners)}</span>`}
+      <span class="when">${esc(a.sub || "")} · KW ${isoWeek(weekStart(Math.floor(+a.week_from)))} bis ${isoWeek(weekStart(Math.min(weeks() - 1, Math.ceil(+a.week_to) - 1)))}</span>
       <div class="prog"><div class="mbar${d === n && n ? " full" : ""}"><i style="width:${n ? Math.round(d / n * 100) : 0}%"></i></div>${d}/${n} erledigt</div>
-      <span class="spacer"></span>${team() ? `<button class="btn small ghost" type="button">${ICON_PLUS} Aufgabe</button>` : ""}</div><div class="agrid"></div>`;
+      <span class="spacer"></span>${team() ? `<button class="btn small ghost addarea" type="button">${ICON_PLUS} Aufgabe</button>` : ""}</div><div class="agrid"></div>`;
     const grid = sec.querySelector(".agrid");
-    items.sort((x, y) => (isDone(x) - isDone(y)) || ((x.due || "9") < (y.due || "9") ? -1 : (x.due || "9") > (y.due || "9") ? 1 : x.nr - y.nr)).forEach((t) => grid.appendChild(itemCard(t)));
-    if (!items.length) grid.innerHTML = `<div class="empty">Keine Aufgaben${who || $("q").value || $("hideDone").checked ? " für diesen Filter" : ""}</div>`;
-    const ab = sec.querySelector(".areahead .btn"); if (ab) ab.onclick = () => openItem(null, { area_id: a.id });
+    const order = (x, y) => (isDone(x) - isDone(y)) || ((x.due || "9") < (y.due || "9") ? -1 : (x.due || "9") > (y.due || "9") ? 1 : x.nr - y.nr);
+    for (const [k, , plural] of KINDS) {
+      const group = items.filter((t) => kindOf(t) === k).sort(order);
+      if (!group.length) continue;
+      if (!kind) grid.insertAdjacentHTML("beforeend", `<div class="kindhead">${plural} <span>${group.length}</span></div>`);
+      group.forEach((t) => grid.appendChild(itemCard(t)));
+    }
+    if (!items.length) grid.innerHTML = `<div class="empty">Keine Aufgaben${who || kind || $("q").value || $("hideDone").checked ? " für diesen Filter" : ""}</div>`;
+    const acc = sec.querySelector(".acc");
+    acc.onclick = () => { const c = !sec.classList.contains("closed"); sec.classList.toggle("closed", c); acc.setAttribute("aria-expanded", String(!c)); c ? closed.add(a.id) : closed.delete(a.id); saveClosed(); };
+    const ob = sec.querySelector("button.owners"); if (ob) ob.onclick = () => openArea(a);
+    const ab = sec.querySelector(".addarea"); if (ab) ab.onclick = () => openItem(null, { area_id: a.id });
     v.appendChild(sec);
   }
 }
@@ -644,6 +684,13 @@ function renderFeedback(v) {
 }
 
 /* ---------- Rendern ---------- */
+function chipsKind() {
+  const box = $("kindChips"); box.innerHTML = "";
+  for (const k of [null, ...KINDS]) {
+    const b = document.createElement("button"); b.className = "chip"; b.textContent = k ? k[2] : "Alle Arten"; b.setAttribute("aria-pressed", String(kind === (k && k[0])));
+    b.onclick = () => { kind = k && k[0]; chipsKind(); render(); }; box.appendChild(b);
+  }
+}
 function chipsWho() {
   const box = $("whoChips"); box.innerHTML = "";
   for (const p of [null, ...PARTIES]) {
@@ -656,7 +703,7 @@ function render() {
   renderHead(); renderGantt();
   document.querySelectorAll(".seg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === view)));
   const filters = view !== "overview";
-  $("whoChips").hidden = !filters; $("q").hidden = !filters; $("hideDone").parentElement.hidden = !filters;
+  $("whoChips").hidden = !filters; $("kindChips").hidden = !filters || view === "feedback"; $("q").hidden = !filters; $("hideDone").parentElement.hidden = !filters;
   const add = $("addMain");
   if (view === "feedback") { add.hidden = false; add.innerHTML = ICON_PLUS + " Fehler melden"; add.onclick = () => openFb(null); }
   else if (team() && view !== "overview") { add.hidden = false; add.innerHTML = ICON_PLUS + " Aufgabe"; add.onclick = () => openItem(null, { area_id: areaFilter || (S.areas[0] && S.areas[0].id) }); }
@@ -668,7 +715,7 @@ function render() {
 function jumpTo(id) {
   const t = S.items.find((x) => x.id === id); if (!t) return;
   closeSheet();
-  who = null; chipsWho(); $("q").value = ""; if (isDone(t)) $("hideDone").checked = false;
+  who = null; chipsWho(); kind = null; chipsKind(); $("q").value = ""; closed.delete(t.area_id); saveClosed(); if (isDone(t)) $("hideDone").checked = false;
   areaFilter = null; view = "plan"; try { localStorage.setItem("pr-view", view); } catch (e) {}
   open.add("i:" + t.id); render();
   const el = document.querySelector(`.card[data-item="${t.id}"]`); if (!el) return;
@@ -716,6 +763,7 @@ function openItem(t, defaults = {}) {
   f.innerHTML = `<h3>${t ? "Aufgabe #" + t.nr : "Neue Aufgabe"}</h3>
     <div class="field"><label for="fTitle">Aufgabe</label><textarea id="fTitle" rows="2">${esc(d.title)}</textarea></div>
     <div class="field"><label for="fDescr">Beschreibung</label><textarea id="fDescr" rows="3">${esc(d.descr)}</textarea></div>
+    <div class="field"><label for="fKind">Art</label><select id="fKind">${opt(KINDS.map((k) => k[0]), d.kind || (d.story ? "story" : "orga"), KINDS.map((k) => k[1]))}</select></div>
     <div class="field"><label for="fStory">User Story</label><textarea id="fStory" rows="2" placeholder="Als … will ich …, damit …">${esc(d.story)}</textarea></div>
     <div class="field"><label for="fAc">Abnahmekriterien (eins pro Zeile)</label><textarea id="fAc" rows="4">${esc((d.ac || []).join("\n"))}</textarea></div>
     <div class="field"><span class="lab">Wer</span>${whoPick(d.who)}</div>
@@ -735,7 +783,7 @@ function openItem(t, defaults = {}) {
   if ($("fDel")) $("fDel").onclick = async () => { if (!confirm("Aufgabe mit allen Unteraufgaben löschen?")) return; closeSheet(); await mutate(() => api("item.delete", { id: t.id }), "Gelöscht"); };
   f.onsubmit = async (e) => {
     e.preventDefault();
-    const data = { title: val("fTitle"), descr: val("fDescr"), story: val("fStory"), ac: $("fAc").value.split("\n").map((x) => x.trim()).filter(Boolean),
+    const data = { title: val("fTitle"), descr: val("fDescr"), kind: val("fKind"), story: val("fStory"), ac: $("fAc").value.split("\n").map((x) => x.trim()).filter(Boolean),
       who: pickedWho(), status: val("fStatus"), area_id: val("fArea"), due: val("fDue") || null, due_text: val("fDue") ? null : (val("fDueText") || null),
       milestone_id: val("fMs") || null, done_when: val("fDoneWhen"), notes: val("fNotes"), internal_note: val("fInt"), internal: $("fInternal").checked };
     if (fullTeam()) data.confidential = $("fConf").checked;
@@ -746,6 +794,20 @@ function openItem(t, defaults = {}) {
   $("sheet").hidden = false; $("fTitle").focus();
 }
 
+function openArea(a) {
+  if (!team()) return;
+  const f = $("form"); editing = a;
+  f.innerHTML = `<h3>Bereich ${esc(a.title)}</h3>
+    <div class="note">Hauptansprechpartner für diesen Bereich. Sieht jeder im Plan und in der Zeitleiste.</div>
+    <div class="field"><span class="lab">Hauptansprechpartner</span>${whoPick(a.owners)}</div>
+    <div class="actions"><button class="btn" type="submit">Speichern</button><button class="btn ghost" type="button" id="aCancel">Abbrechen</button></div>
+    <div class="err" id="fErr"></div>`;
+  bindWho(); $("aCancel").onclick = closeSheet;
+  f.onsubmit = async (e) => { e.preventDefault(); const owners = pickedWho();
+    if (!owners.length) { $("fErr").textContent = "Bitte mindestens eine Person wählen."; return; }
+    closeSheet(); await mutate(() => api("area.save", { data: { id: a.id, owners } }), "Ansprechpartner gespeichert"); };
+  $("sheet").hidden = false;
+}
 function openMs(m) {
   const f = $("form"); editing = m;
   const ro = !team();
@@ -855,8 +917,8 @@ function showPreview() {
     : previewAs === "partner" ? "Vorschau: So sieht Felix den Projektraum. Nur lesen, hier wird nichts gespeichert." : "";
 }
 const ROLE_TEXT = {
-  team: ["Alles, auch interne Aufgaben und Notizen, Raten an den Meilensteinen und die Rechnungsaufgaben", "Alles: Aufgaben, Unteraufgaben, Zuordnung, Meilensteine mit Raten, Feedback erledigen, löschen"],
-  partner: ["Alles wie das Team, nur keine Kosten: keine Raten an den Meilensteinen, keine Rechnungsaufgaben", "Aufgaben, Unteraufgaben, Zuordnung, Meilensteine ohne Raten, Feedback erledigen. Keine Meilensteine löschen"],
+  team: ["Alles, auch interne Aufgaben und Notizen, Raten an den Meilensteinen und die Rechnungsaufgaben", "Alles: Aufgaben, Unteraufgaben, Zuordnung, Ansprechpartner der Bereiche, Meilensteine mit Raten, Feedback erledigen, löschen"],
+  partner: ["Alles wie das Team, nur keine Kosten: keine Raten an den Meilensteinen, keine Rechnungsaufgaben", "Aufgaben, Unteraufgaben, Zuordnung, Ansprechpartner der Bereiche, Meilensteine ohne Raten, Feedback erledigen. Keine Meilensteine löschen"],
   kunde: ["Alle Aufgaben außer „nur Team“, ohne interne Notizen. Raten an den Meilensteinen ja, Rechnungsaufgaben nein", "Eigene Aufgaben und Unteraufgaben (Livono) abhaken, Fehler mit Screenshot melden, eigene offene Meldungen bearbeiten, kommentieren"],
 };
 function openWhoSees() {
@@ -906,7 +968,7 @@ $("q").oninput = render; $("hideDone").onchange = () => { try { localStorage.set
     $("asSel").onchange = async () => { previewAs = $("asSel").value || null; try { await refresh(); } catch (e) { toast(e.message); } showPreview(); };
     $("whoSees").onclick = openWhoSees;
   }
-  $("login").hidden = true; $("app").hidden = false; chipsWho(); render();
+  $("login").hidden = true; $("app").hidden = false; chipsWho(); chipsKind(); render();
   setInterval(() => { if (!document.hidden && $("sheet").hidden && !busy) refresh().catch(() => {}); }, 30000);
 })();
 </script>
