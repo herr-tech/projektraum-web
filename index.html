@@ -164,6 +164,21 @@ button.title { border: 0; background: transparent; padding: 0; text-align: left;
 .subrow:hover { background: var(--line); }
 .subrow .check { width: 17px; height: 17px; border-radius: 5px; margin: 0; }
 .subrow .t { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
+button.subt { border: 0; background: transparent; padding: 0; text-align: left; font-size: 13px; }
+.card > .subs { border-top: 1px solid var(--line2); padding-top: 4px; }
+.preview { background: var(--amberbg); color: var(--amber); border: 1px solid rgba(245,180,84,.4); border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+.topright { display: grid; gap: 10px; justify-items: end; }
+.userchip { display: inline-flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--line2); border-radius: 999px; padding: 6px 12px; font-size: 13px; color: var(--soft); }
+.userchip b { color: var(--ink); font-weight: 600; }
+.userchip .role { padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: var(--lavbg); color: var(--lav2); }
+.userchip .role.partner { background: var(--cyanbg); color: var(--cyan); }
+.userchip .role.kunde { background: var(--amberbg); color: var(--amber); }
+@media (max-width: 760px) { .topright { justify-items: start; } }
+.rolebox { font-size: 12.5px; color: var(--faint); display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rolebox select { background: var(--surface); border: 1px solid var(--line2); border-radius: 8px; padding: 5px 8px; font-size: 13px; }
+table.who-sees { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.who-sees td, table.who-sees th { text-align: left; padding: 6px 4px; border-top: 1px solid var(--line2); vertical-align: top; }
+table.who-sees th { color: var(--faint); font-weight: 600; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
 .subrow.done .t { color: var(--faint); text-decoration: line-through; }
 .subrow .x { border: 0; background: transparent; color: var(--faint); padding: 0 4px; font-size: 16px; line-height: 1; }
 .subrow .x:hover { color: var(--red); }
@@ -237,15 +252,19 @@ button.title { border: 0; background: transparent; padding: 0; text-align: left;
         <div class="eyebrow" id="eyebrow">Projektraum</div>
         <h1 id="h1">Projektraum</h1>
         <div class="sub" id="subtitle"></div>
-        <div class="me" id="meLine"></div>
       </div>
+      <div class="topright">
+        <div class="userchip" id="meLine"></div>
+        <div class="rolebox" id="roleBox" hidden>Ansicht als <select id="asSel" aria-label="Ansicht als"><option value="">Team (Jacob, Jonas)</option><option value="partner">Partner (Felix)</option><option value="kunde">Kunde (Livono)</option></select><button class="btn small ghost" type="button" id="whoSees">Wer sieht was</button></div>
       <div class="stats">
         <div class="stat"><b id="sDone">0</b><small>Aufgaben erledigt</small></div>
         <div class="stat"><b id="sMs">0</b><small>Meilensteine</small></div>
         <div class="stat"><b id="sFb">0</b><small>Offene Meldungen</small></div>
         <div class="stat"><b id="sLate">0</b><small>Überfällig</small></div>
       </div>
+      </div>
     </div>
+    <div class="preview" id="previewBar" hidden></div>
     <div class="bar" aria-hidden="true"><i id="prog"></i></div>
     <div class="next" id="next"></div>
     <section class="gantt" aria-label="Grober Projektplan">
@@ -283,6 +302,7 @@ const ICON_CHECK = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" 
 const ICON_DOWN = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
 const ICON_PLUS = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
 
+let previewAs = null, realRole = null;
 let TOKEN = null, S = null, view = "overview", who = null, areaFilter = null, busy = false, editing = null, pendingShots = [];
 const open = new Set();
 const $ = (id) => document.getElementById(id);
@@ -299,6 +319,7 @@ const kundeName = () => (S && S.project.settings && S.project.settings.kunde) ||
 function toast(msg) { const el = $("toast"); el.textContent = msg; el.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (el.hidden = true), 2600); }
 
 async function api(action, payload = {}) {
+  if (previewAs && action !== "load") throw new Error("Vorschau: hier wird nichts gespeichert. Oben wieder auf Team stellen.");
   const r = await fetch(API, { method: "POST", headers: { "content-type": "application/json", "x-pr-token": TOKEN }, body: JSON.stringify({ action, ...payload }) });
   const data = await r.json().catch(() => ({}));
   if (r.status === 401) { showLogin("Dieser Link ist nicht (mehr) gültig. Bitte frag bei Jacob einen neuen an."); throw new Error("401"); }
@@ -350,7 +371,8 @@ function renderHead() {
   $("eyebrow").textContent = "Projektraum · " + (p.client || "");
   $("h1").innerHTML = esc(p.name.replace(/ Startpaket$/, "")) + " <span>Startpaket</span>";
   $("subtitle").textContent = (p.settings && p.settings.subtitle) || "";
-  $("meLine").innerHTML = "Angemeldet als <b>" + esc(S.me.label) + "</b>" + (fullTeam() ? " · Team" : team() ? " · Partner" : "");
+  const rl = S.me.role === "team" ? "Team" : S.me.role === "partner" ? "Partner" : "Kunde";
+  $("meLine").innerHTML = `<span>Angemeldet als</span> <b>${esc(S.me.label)}</b> <span class="role ${S.me.role}">${previewAs ? "Vorschau " : ""}${rl}</span>`;
   let d = 0, n = 0; for (const a of S.areas) { const [x, y] = areaProgress(a.id); d += x; n += y; }
   $("sDone").textContent = d + " / " + n;
   $("prog").style.width = (n ? Math.round(d / n * 100) : 0) + "%";
@@ -412,7 +434,9 @@ function itemCard(t, opts = {}) {
       ${whoChips(t.who)}
       ${t.due ? `<span class="due${late ? " late" : ""}">${fmt(t.due)}</span>` : t.due_text ? `<span class="due">${esc(t.due_text)}</span>` : ""}
     </div>
-    ${subs.length ? `<div class="prog"><div class="mbar${d === n ? " full" : ""}"><i style="width:${Math.round(d / n * 100)}%"></i></div>${d}/${n}</div>` : ""}
+    ${subs.length ? `<div class="prog"><div class="mbar${d === n ? " full" : ""}"><i style="width:${Math.round(d / n * 100)}%"></i></div>${d}/${n}</div>
+    <div class="subs">${subs.map((s) => `
+      <div class="subrow${isDone(s) ? " done" : ""}" data-id="${s.id}">${chk(isDone(s), isDone(s) ? "Wieder öffnen" : "Abhaken", !canTick(s))}<button type="button" class="t subt">${esc(s.title)}</button>${whoChips(s.who)}${s.due ? `<span class="due${itemLate(s) ? " late" : ""}">${fmt(s.due)}</span>` : ""}</div>`).join("")}</div>` : ""}
     <div class="info" ${isOpen ? "" : "hidden"}>
       ${t.descr ? `<div>${esc(t.descr)}</div>` : ""}
       ${t.story ? `<div class="story"><b>User Story:</b> ${esc(t.story)}</div>` : ""}
@@ -421,9 +445,7 @@ function itemCard(t, opts = {}) {
       ${t.notes ? `<div><b>Hinweis:</b> ${esc(t.notes)}</div>` : ""}
       ${ms ? `<div><b>Meilenstein:</b> ${esc(ms.title)}${ms.due ? " · " + fmt(ms.due) : ""}</div>` : ""}
       ${team() && t.internal_note ? `<div class="intern"><b>Intern:</b> ${esc(t.internal_note)}</div>` : ""}
-      ${subs.length || team() ? `<div><b>Unteraufgaben</b><div class="subs">${subs.map((s) => `
-        <div class="subrow${isDone(s) ? " done" : ""}" data-id="${s.id}">${chk(isDone(s), "Abhaken", !canTick(s))}<span class="t">${esc(s.title)}</span>${whoChips(s.who)}${s.due ? `<span class="due${itemLate(s) ? " late" : ""}">${fmt(s.due)}</span>` : ""}${team() ? `<button type="button" class="x" aria-label="Unteraufgabe löschen">×</button>` : ""}</div>`).join("") || `<div class="empty">Noch keine Unteraufgaben</div>`}</div>
-        ${team() ? `<form class="addsub"><input placeholder="Unteraufgabe hinzufügen" aria-label="Unteraufgabe hinzufügen"><button class="btn small" type="submit">${ICON_PLUS}</button></form>` : ""}</div>` : ""}
+      ${team() ? `<form class="addsub"><input placeholder="Unteraufgabe hinzufügen" aria-label="Unteraufgabe hinzufügen"><button class="btn small" type="submit">${ICON_PLUS}</button></form>` : ""}
     </div>`;
   const info = el.querySelector(".info"), ib = el.querySelector(".ibtn");
   ib.onclick = () => { const o = info.hidden; info.hidden = !o; ib.setAttribute("aria-expanded", String(o)); o ? open.add(key) : open.delete(key); };
@@ -432,7 +454,7 @@ function itemCard(t, opts = {}) {
   el.querySelectorAll(".subrow").forEach((row) => {
     const s = S.items.find((x) => x.id === row.dataset.id);
     row.querySelector(".check").onclick = () => saveItem(s, { status: isDone(s) ? "Offen" : "Erledigt" });
-    const x = row.querySelector(".x"); if (x) x.onclick = () => delItem(s, true);
+    row.querySelector(".subt").onclick = () => team() ? openSub(s, t) : null;
   });
   const add = el.querySelector(".addsub");
   if (add) add.onsubmit = async (e) => { e.preventDefault(); const v = add.querySelector("input").value.trim(); if (!v) return;
@@ -447,7 +469,7 @@ function msCard(m) {
   const el = document.createElement("article");
   el.className = "ms" + (reached ? " reached" : "") + (late ? " late" : "");
   el.innerHTML = `<div class="crow">${chk(reached, reached ? "Wieder öffnen" : "Als erreicht abhaken", !team())}<button type="button" class="title">${esc(m.title)}</button></div>
-    <div class="meta"><span class="dia"></span><b class="${late ? "due late" : ""}" style="font-variant-numeric:tabular-nums">${m.due ? fmt(m.due) : esc(m.due_text || "offen")}</b>${m.status === "In Arbeit" ? stPill("In Arbeit") : ""}${m.payment && team() ? `<span class="pay">${esc(m.payment)}</span>` : ""}${whoChips(m.who)}</div>
+    <div class="meta"><span class="dia"></span><b class="${late ? "due late" : ""}" style="font-variant-numeric:tabular-nums">${m.due ? fmt(m.due) : esc(m.due_text || "offen")}</b>${m.status === "In Arbeit" ? stPill("In Arbeit") : ""}${m.payment ? `<span class="pay">${esc(m.payment)}</span>` : ""}${whoChips(m.who)}</div>
     ${items.length ? `<div class="prog"><div class="mbar${d === items.length ? " full" : ""}"><i style="width:${Math.round(d / items.length * 100)}%"></i></div>${d}/${items.length}</div>` : ""}`;
   el.querySelector(".check").onclick = () => mutate(() => api("ms.save", { data: { id: m.id, status: reached ? "Offen" : "Erreicht" } }), reached ? "Wieder offen" : "Meilenstein erreicht");
   el.querySelector(".title").onclick = () => openMs(m);
@@ -649,7 +671,7 @@ function normalize(d) {
   for (const x of [...d.items, ...d.milestones, ...d.feedback]) x.due = day(x.due);
   return d;
 }
-async function load() { return normalize(await api("load")); }
+async function load() { return normalize(await api("load", previewAs ? { as: previewAs } : {})); }
 async function refresh() { S = await load(); render(); }
 async function mutate(fn, msg) {
   if (busy) return; busy = true;
@@ -661,7 +683,6 @@ function saveItem(t, patch, msg) {
   if (!team()) { if (!canTick(t)) return toast("Diese Aufgabe liegt beim Team"); patch = { status: patch.status }; }
   return mutate(() => api("item.save", { data: { id: t.id, ...patch } }), msg || (patch.status === "Erledigt" ? "Erledigt" : patch.status ? "Wieder offen" : "Gespeichert"));
 }
-function delItem(t, quiet) { if (!quiet && !confirm("Aufgabe wirklich löschen?")) return; if (quiet && !confirm("Unteraufgabe „" + t.title + "“ löschen?")) return; return mutate(() => api("item.delete", { id: t.id }), "Gelöscht"); }
 
 /* ---------- Formulare ---------- */
 function closeSheet() { $("sheet").hidden = true; editing = null; pendingShots = []; }
@@ -725,7 +746,7 @@ function openMs(m) {
     ${fullTeam() ? `<div class="field"><label for="mPay">Zahlung (nur Jacob und Jonas)</label><input id="mPay" value="${esc(m && m.payment || "")}"></div>` : ""}
     <div class="field"><label for="mDone">Erreicht wenn</label><textarea id="mDone" rows="2">${esc(m && m.done_when)}</textarea></div>
     <div class="field"><label for="mNotes">Hinweis (sieht auch ${esc(kundeName())})</label><textarea id="mNotes" rows="2">${esc(m && m.notes)}</textarea></div>
-    ${fullTeam() ? `<div class="field"><label for="mInt">Interne Notiz (nur Jacob und Jonas)</label><textarea id="mInt" rows="2">${esc(m && m.internal_note)}</textarea></div>` : ""}`}
+    <div class="field"><label for="mInt">Interne Notiz (nur Team)</label><textarea id="mInt" rows="2">${esc(m && m.internal_note)}</textarea></div>`}
     ${items.length ? `<div class="info"><b>Aufgaben dazu</b><div class="subs">${items.map((t) => `<div class="subrow${isDone(t) ? " done" : ""}"><span class="t">#${t.nr} ${esc(t.title)}</span>${whoChips(t.who)}</div>`).join("")}</div></div>` : ""}
     <div class="actions">${ro ? "" : `<button class="btn" type="submit">Speichern</button>`}<button class="btn ghost" type="button" id="mCancel">${ro ? "Schließen" : "Abbrechen"}</button><span class="spacer"></span>${m && fullTeam() ? `<button class="btn danger" type="button" id="mDel">Löschen</button>` : ""}</div>
     <div class="err" id="fErr"></div>`;
@@ -734,7 +755,8 @@ function openMs(m) {
   if ($("mDel")) $("mDel").onclick = async () => { if (!confirm("Meilenstein löschen?")) return; closeSheet(); await mutate(() => api("ms.delete", { id: m.id }), "Gelöscht"); };
   f.onsubmit = async (e) => { e.preventDefault(); if (ro) return;
     const data = { title: val("mTitle"), who: pickedWho(), status: val("mStatus"), due: val("mDue") || null, done_when: val("mDone"), notes: val("mNotes") };
-    if (fullTeam()) Object.assign(data, { payment: val("mPay") || null, internal_note: val("mInt") });
+    data.internal_note = val("mInt");
+    if (fullTeam()) data.payment = val("mPay") || null;
     if (!data.title) { $("fErr").textContent = "Bitte einen Titel eintragen."; return; }
     if (m) data.id = m.id; closeSheet(); await mutate(() => api("ms.save", { data }), "Gespeichert"); };
   $("sheet").hidden = false;
@@ -810,6 +832,46 @@ function openFb(f) {
   $("sheet").hidden = false; $("bTitle").focus();
 }
 
+/* ---------- Admin: Vorschau und Wer sieht was ---------- */
+function showPreview() {
+  const b = $("previewBar");
+  b.hidden = !previewAs;
+  b.textContent = previewAs === "kunde" ? "Vorschau: So sieht Livono (Laurenz) den Projektraum. Nur lesen, hier wird nichts gespeichert."
+    : previewAs === "partner" ? "Vorschau: So sieht Felix den Projektraum. Nur lesen, hier wird nichts gespeichert." : "";
+}
+const ROLE_TEXT = {
+  team: ["Alles, auch interne Aufgaben und Notizen, Raten an den Meilensteinen und die Rechnungsaufgaben", "Alles: Aufgaben, Unteraufgaben, Zuordnung, Meilensteine mit Raten, Feedback erledigen, löschen"],
+  partner: ["Alles wie das Team, nur keine Kosten: keine Raten an den Meilensteinen, keine Rechnungsaufgaben", "Aufgaben, Unteraufgaben, Zuordnung, Meilensteine ohne Raten, Feedback erledigen. Keine Meilensteine löschen"],
+  kunde: ["Alle Aufgaben außer „nur Team“, ohne interne Notizen. Raten an den Meilensteinen ja, Rechnungsaufgaben nein", "Eigene Aufgaben und Unteraufgaben (Livono) abhaken, Fehler mit Screenshot melden, eigene offene Meldungen bearbeiten, kommentieren"],
+};
+function openWhoSees() {
+  const f = $("form");
+  const rows = S.people.map((p) => `<tr><td><b>${esc(p.label)}</b><br><span class="note">${p.role === "team" ? "Team" : p.role === "partner" ? "Partner" : "Kunde"}</span></td><td>${esc(ROLE_TEXT[p.role][0])}</td><td>${esc(ROLE_TEXT[p.role][1])}</td></tr>`).join("");
+  f.innerHTML = `<h3>Wer sieht was</h3>
+    <div class="note">Jede Person hat einen eigenen Link. Was jemand sieht, hängt an der Rolle. Mit „Ansicht als“ oben siehst du den Projektraum genau so wie Felix oder Livono.</div>
+    <table class="who-sees"><tr><th>Person</th><th>Sieht</th><th>Darf</th></tr>${rows}</table>
+    <div class="note">„Nur Team“ an einer Aufgabe versteckt sie vor Livono. „Vertraulich“ versteckt sie zusätzlich vor Felix (Preise, Rechnungen). Raten trägst du am Meilenstein ein.</div>
+    <div class="actions"><button class="btn ghost" type="button" id="wsClose">Schließen</button></div>`;
+  $("wsClose").onclick = closeSheet; f.onsubmit = (e) => e.preventDefault();
+  $("sheet").hidden = false;
+}
+
+function openSub(s, parent) {
+  const f = $("form"); editing = s;
+  f.innerHTML = `<h3>Unteraufgabe</h3><div class="note">Gehört zu #${parent.nr} ${esc(parent.title)}</div>
+    <div class="field"><label for="sTitle">Unteraufgabe</label><textarea id="sTitle" rows="2">${esc(s.title)}</textarea></div>
+    <div class="field"><span class="lab">Wer</span>${whoPick(s.who)}</div>
+    <div class="two"><div class="field"><label for="sStatus">Status</label><select id="sStatus">${opt(STATUSES, s.status)}</select></div>
+      <div class="field"><label for="sDue">Bis</label><input id="sDue" type="date" value="${esc(s.due || "")}"></div></div>
+    <div class="actions"><button class="btn" type="submit">Speichern</button><button class="btn ghost" type="button" id="sCancel">Abbrechen</button><span class="spacer"></span><button class="btn danger" type="button" id="sDel">Löschen</button></div>
+    <div class="err" id="fErr"></div>`;
+  bindWho(); $("sCancel").onclick = closeSheet;
+  $("sDel").onclick = async () => { if (!confirm("Unteraufgabe löschen?")) return; closeSheet(); await mutate(() => api("item.delete", { id: s.id }), "Gelöscht"); };
+  f.onsubmit = async (e) => { e.preventDefault(); const title = val("sTitle"); if (!title) { $("fErr").textContent = "Bitte einen Titel eintragen."; return; }
+    closeSheet(); await mutate(() => api("item.save", { data: { id: s.id, title, who: pickedWho(), status: val("sStatus"), due: val("sDue") || null } }), "Gespeichert"); };
+  $("sheet").hidden = false; $("sTitle").focus();
+}
+
 /* ---------- Start ---------- */
 function showLogin(msg) { $("app").hidden = true; $("login").hidden = false; if (msg) $("loginMsg").textContent = msg; try { localStorage.removeItem("pr-token"); } catch (e) {} }
 document.querySelectorAll(".seg button").forEach((b) => b.onclick = () => { areaFilter = null; setView(b.dataset.view); });
@@ -823,6 +885,12 @@ $("q").oninput = render; $("hideDone").onchange = () => { try { localStorage.set
   try { view = localStorage.getItem("pr-view") || "overview"; $("hideDone").checked = localStorage.getItem("pr-hide") === "1"; } catch (e) {}
   if (u.searchParams.get("v")) view = u.searchParams.get("v");
   try { S = await load(); } catch (e) { if (e.message !== "401") { $("login").hidden = false; $("loginMsg").textContent = "Der Projektraum lädt gerade nicht. Bitte gleich noch einmal versuchen."; } return; }
+  realRole = S.me.role;
+  if (realRole === "team") {
+    $("roleBox").hidden = false;
+    $("asSel").onchange = async () => { previewAs = $("asSel").value || null; try { await refresh(); } catch (e) { toast(e.message); } showPreview(); };
+    $("whoSees").onclick = openWhoSees;
+  }
   $("login").hidden = true; $("app").hidden = false; chipsWho(); render();
   setInterval(() => { if (!document.hidden && $("sheet").hidden && !busy) refresh().catch(() => {}); }, 30000);
 })();
