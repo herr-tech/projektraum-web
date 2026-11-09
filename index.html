@@ -180,6 +180,9 @@ table.who-sees { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.who-sees td, table.who-sees th { text-align: left; padding: 6px 4px; border-top: 1px solid var(--line2); vertical-align: top; }
 table.who-sees th { color: var(--faint); font-weight: 600; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
 .subrow.done .t { color: var(--faint); text-decoration: line-through; }
+.card.flash { outline: 2px solid var(--lav); outline-offset: 2px; }
+button.jump { cursor: pointer; }
+button.jump:hover { color: var(--lav2); text-decoration: underline; }
 .subrow .x { border: 0; background: transparent; color: var(--faint); padding: 0 4px; font-size: 16px; line-height: 1; }
 .subrow .x:hover { color: var(--red); }
 .addsub { display: flex; gap: 6px; margin-top: 4px; }
@@ -420,6 +423,7 @@ function itemCard(t, opts = {}) {
   el.className = "card" + (done ? " done" : "") + (late ? " late" : "");
   if (opts.drag && team()) el.draggable = true;
   const key = "i:" + t.id, isOpen = open.has(key);
+  el.dataset.item = t.id;
   el.innerHTML = `
     <div class="crow">
       ${chk(done, done ? "Wieder öffnen" : "Abhaken", !canTick(t))}
@@ -661,6 +665,16 @@ function render() {
   const v = $("view"); v.innerHTML = ""; v.className = "sect";
   ({ overview: renderOverview, plan: renderPlan, weeks: renderWeeks, feedback: renderFeedback })[view](v);
 }
+function jumpTo(id) {
+  const t = S.items.find((x) => x.id === id); if (!t) return;
+  closeSheet();
+  who = null; chipsWho(); $("q").value = ""; if (isDone(t)) $("hideDone").checked = false;
+  areaFilter = null; view = "plan"; try { localStorage.setItem("pr-view", view); } catch (e) {}
+  open.add("i:" + t.id); render();
+  const el = document.querySelector(`.card[data-item="${t.id}"]`); if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.add("flash");
+  setTimeout(() => el.classList.remove("flash"), 2500);
+}
 function setView(x) { view = x; try { localStorage.setItem("pr-view", x); } catch (e) {} if (x !== "plan") areaFilter = null; render(); window.scrollTo({ top: document.querySelector(".tools").offsetTop - 12, behavior: "smooth" }); }
 
 /* ---------- Speichern ---------- */
@@ -747,11 +761,12 @@ function openMs(m) {
     <div class="field"><label for="mDone">Erreicht wenn</label><textarea id="mDone" rows="2">${esc(m && m.done_when)}</textarea></div>
     <div class="field"><label for="mNotes">Hinweis (sieht auch ${esc(kundeName())})</label><textarea id="mNotes" rows="2">${esc(m && m.notes)}</textarea></div>
     <div class="field"><label for="mInt">Interne Notiz (nur Team)</label><textarea id="mInt" rows="2">${esc(m && m.internal_note)}</textarea></div>`}
-    ${items.length ? `<div class="info"><b>Aufgaben dazu</b><div class="subs">${items.map((t) => `<div class="subrow${isDone(t) ? " done" : ""}"><span class="t">#${t.nr} ${esc(t.title)}</span>${whoChips(t.who)}</div>`).join("")}</div></div>` : ""}
+    ${items.length ? `<div class="info"><b>Aufgaben dazu</b><div class="subs">${items.map((t) => `<div class="subrow${isDone(t) ? " done" : ""}"><button type="button" class="t subt jump" data-id="${t.id}">#${t.nr} ${esc(t.title)}</button>${whoChips(t.who)}</div>`).join("")}</div></div>` : ""}
     <div class="actions">${ro ? "" : `<button class="btn" type="submit">Speichern</button>`}<button class="btn ghost" type="button" id="mCancel">${ro ? "Schließen" : "Abbrechen"}</button><span class="spacer"></span>${m && fullTeam() ? `<button class="btn danger" type="button" id="mDel">Löschen</button>` : ""}</div>
     <div class="err" id="fErr"></div>`;
   if (!ro) bindWho();
   $("mCancel").onclick = closeSheet;
+  f.querySelectorAll("button.jump").forEach((b) => b.onclick = () => jumpTo(b.dataset.id));
   if ($("mDel")) $("mDel").onclick = async () => { if (!confirm("Meilenstein löschen?")) return; closeSheet(); await mutate(() => api("ms.delete", { id: m.id }), "Gelöscht"); };
   f.onsubmit = async (e) => { e.preventDefault(); if (ro) return;
     const data = { title: val("mTitle"), who: pickedWho(), status: val("mStatus"), due: val("mDue") || null, done_when: val("mDone"), notes: val("mNotes") };
