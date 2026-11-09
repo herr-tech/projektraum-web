@@ -292,7 +292,8 @@ const today = () => iso(new Date());
 const fmt = (s) => s ? s.slice(8, 10) + "." + s.slice(5, 7) + "." : "";
 const addDays = (s, n) => { const d = new Date(s + "T12:00:00"); d.setDate(d.getDate() + n); return iso(d); };
 const isoWeek = (s) => { const d = new Date(s + "T12:00:00"); d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7); const w1 = new Date(d.getFullYear(), 0, 4); return 1 + Math.round(((d - w1) / 864e5 - 3 + (w1.getDay() + 6) % 7) / 7); };
-const team = () => S && S.me.role === "team";
+const team = () => S && S.me.role !== "kunde";
+const fullTeam = () => S && S.me.role === "team";
 const kundeName = () => (S && S.project.settings && S.project.settings.kunde) || "Kunde";
 
 function toast(msg) { const el = $("toast"); el.textContent = msg; el.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (el.hidden = true), 2600); }
@@ -349,7 +350,7 @@ function renderHead() {
   $("eyebrow").textContent = "Projektraum · " + (p.client || "");
   $("h1").innerHTML = esc(p.name.replace(/ Startpaket$/, "")) + " <span>Startpaket</span>";
   $("subtitle").textContent = (p.settings && p.settings.subtitle) || "";
-  $("meLine").innerHTML = "Angemeldet als <b>" + esc(S.me.label) + "</b>" + (team() ? " · Team" : "");
+  $("meLine").innerHTML = "Angemeldet als <b>" + esc(S.me.label) + "</b>" + (fullTeam() ? " · Team" : team() ? " · Partner" : "");
   let d = 0, n = 0; for (const a of S.areas) { const [x, y] = areaProgress(a.id); d += x; n += y; }
   $("sDone").textContent = d + " / " + n;
   $("prog").style.width = (n ? Math.round(d / n * 100) : 0) + "%";
@@ -406,7 +407,7 @@ function itemCard(t, opts = {}) {
     <div class="meta">
       <span class="nr">#${t.nr}</span>
       ${opts.area && area ? `<span class="tag">${esc(area.title)}</span>` : ""}
-      ${t.internal ? `<span class="tag int">nur Team</span>` : ""}
+      ${t.confidential ? `<span class="tag int">vertraulich</span>` : t.internal ? `<span class="tag int">nur Team</span>` : ""}
       ${t.status !== "Offen" && !done ? stPill(t.status) : ""}
       ${whoChips(t.who)}
       ${t.due ? `<span class="due${late ? " late" : ""}">${fmt(t.due)}</span>` : t.due_text ? `<span class="due">${esc(t.due_text)}</span>` : ""}
@@ -692,6 +693,7 @@ function openItem(t, defaults = {}) {
     <div class="field"><label for="fNotes">Hinweis (sieht auch ${esc(kundeName())})</label><textarea id="fNotes" rows="2">${esc(d.notes)}</textarea></div>
     <div class="field"><label for="fInt">Interne Notiz (nur Team)</label><textarea id="fInt" rows="3">${esc(d.internal_note)}</textarea></div>
     <label class="toggle"><input type="checkbox" id="fInternal"${d.internal ? " checked" : ""}> Ganze Aufgabe nur fürs Team sichtbar</label>
+    ${fullTeam() ? `<label class="toggle"><input type="checkbox" id="fConf"${d.confidential ? " checked" : ""}> Vertraulich (Preise, Rechnungen): nur Jacob und Jonas</label>` : ""}
     <div class="actions"><button class="btn" type="submit">Speichern</button><button class="btn ghost" type="button" id="fCancel">Abbrechen</button><span class="spacer"></span>${t ? `<button class="btn danger" type="button" id="fDel">Löschen</button>` : ""}</div>
     <div class="err" id="fErr"></div>`;
   bindWho(); $("fCancel").onclick = closeSheet;
@@ -701,6 +703,7 @@ function openItem(t, defaults = {}) {
     const data = { title: val("fTitle"), descr: val("fDescr"), story: val("fStory"), ac: $("fAc").value.split("\n").map((x) => x.trim()).filter(Boolean),
       who: pickedWho(), status: val("fStatus"), area_id: val("fArea"), due: val("fDue") || null, due_text: val("fDue") ? null : (val("fDueText") || null),
       milestone_id: val("fMs") || null, done_when: val("fDoneWhen"), notes: val("fNotes"), internal_note: val("fInt"), internal: $("fInternal").checked };
+    if (fullTeam()) data.confidential = $("fConf").checked;
     if (!data.title) { $("fErr").textContent = "Bitte eine Aufgabe eintragen."; return; }
     if (t) data.id = t.id;
     closeSheet(); await mutate(() => api("item.save", { data }), t ? "Gespeichert" : "Aufgabe angelegt");
@@ -719,18 +722,19 @@ function openMs(m) {
     <div class="field"><span class="lab">Wer</span>${whoPick(m && m.who)}</div>
     <div class="two"><div class="field"><label for="mStatus">Status</label><select id="mStatus">${opt(["Offen", "In Arbeit", "Erreicht"], m ? m.status : "Offen")}</select></div>
       <div class="field"><label for="mDue">Datum</label><input id="mDue" type="date" value="${esc(m && m.due || "")}"></div></div>
-    <div class="field"><label for="mPay">Zahlung (nur Team sichtbar)</label><input id="mPay" value="${esc(m && m.payment || "")}"></div>
+    ${fullTeam() ? `<div class="field"><label for="mPay">Zahlung (nur Jacob und Jonas)</label><input id="mPay" value="${esc(m && m.payment || "")}"></div>` : ""}
     <div class="field"><label for="mDone">Erreicht wenn</label><textarea id="mDone" rows="2">${esc(m && m.done_when)}</textarea></div>
     <div class="field"><label for="mNotes">Hinweis (sieht auch ${esc(kundeName())})</label><textarea id="mNotes" rows="2">${esc(m && m.notes)}</textarea></div>
-    <div class="field"><label for="mInt">Interne Notiz (nur Team)</label><textarea id="mInt" rows="2">${esc(m && m.internal_note)}</textarea></div>`}
+    ${fullTeam() ? `<div class="field"><label for="mInt">Interne Notiz (nur Jacob und Jonas)</label><textarea id="mInt" rows="2">${esc(m && m.internal_note)}</textarea></div>` : ""}`}
     ${items.length ? `<div class="info"><b>Aufgaben dazu</b><div class="subs">${items.map((t) => `<div class="subrow${isDone(t) ? " done" : ""}"><span class="t">#${t.nr} ${esc(t.title)}</span>${whoChips(t.who)}</div>`).join("")}</div></div>` : ""}
-    <div class="actions">${ro ? "" : `<button class="btn" type="submit">Speichern</button>`}<button class="btn ghost" type="button" id="mCancel">${ro ? "Schließen" : "Abbrechen"}</button><span class="spacer"></span>${m && !ro ? `<button class="btn danger" type="button" id="mDel">Löschen</button>` : ""}</div>
+    <div class="actions">${ro ? "" : `<button class="btn" type="submit">Speichern</button>`}<button class="btn ghost" type="button" id="mCancel">${ro ? "Schließen" : "Abbrechen"}</button><span class="spacer"></span>${m && fullTeam() ? `<button class="btn danger" type="button" id="mDel">Löschen</button>` : ""}</div>
     <div class="err" id="fErr"></div>`;
   if (!ro) bindWho();
   $("mCancel").onclick = closeSheet;
   if ($("mDel")) $("mDel").onclick = async () => { if (!confirm("Meilenstein löschen?")) return; closeSheet(); await mutate(() => api("ms.delete", { id: m.id }), "Gelöscht"); };
   f.onsubmit = async (e) => { e.preventDefault(); if (ro) return;
-    const data = { title: val("mTitle"), who: pickedWho(), status: val("mStatus"), due: val("mDue") || null, payment: val("mPay") || null, done_when: val("mDone"), notes: val("mNotes"), internal_note: val("mInt") };
+    const data = { title: val("mTitle"), who: pickedWho(), status: val("mStatus"), due: val("mDue") || null, done_when: val("mDone"), notes: val("mNotes") };
+    if (fullTeam()) Object.assign(data, { payment: val("mPay") || null, internal_note: val("mInt") });
     if (!data.title) { $("fErr").textContent = "Bitte einen Titel eintragen."; return; }
     if (m) data.id = m.id; closeSheet(); await mutate(() => api("ms.save", { data }), "Gespeichert"); };
   $("sheet").hidden = false;
