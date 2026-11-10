@@ -415,9 +415,17 @@ const person = (n) => { const p = S.people.find((x) => x.name === n); return p ?
 const quickUndo = (o) => o.done_by === S.me.name && o.done_at && Date.now() - Date.parse(o.done_at) < 110000;
 // Während jemand tippt, nicht im Hintergrund neu zeichnen, sonst ist der Text weg
 const typing = () => [...document.querySelectorAll("#view input:not([type=checkbox])")].some((i) => i.value.trim() || i === document.activeElement);
-function cbtn(k, id, total) {
+function cbtn(k, id) {
   const o = openCmts(k, id), n = cmtsOf(k, id).length;
-  return `<button type="button" class="cbtn${o ? " open" : n ? " has" : ""}" aria-label="Kommentare${n ? ": " + n + ", davon " + o + " offen" : ""}" title="Kommentare">${ICON_CMT}${o ? o + " offen" : n ? n : total ? "Kommentar" : ""}</button>`;
+  return `<button type="button" class="cbtn${o ? " open" : n ? " has" : ""}" aria-label="Kommentare${n ? ": " + n + ", davon " + o + " offen" : ""}" title="Kommentare">${ICON_CMT}${o ? o + " offen" : n ? n : ""}</button>`;
+}
+// Team soll sehen, ob Livono den Kommentar mitliest
+function audience(k, id) {
+  if (!team()) return "";
+  const it = k === "item_id" && S.items.find((x) => x.id === id), top = it && (it.parent_id ? S.items.find((x) => x.id === it.parent_id) || it : it);
+  if (it && (it.confidential || top.confidential)) return " (nur Jacob und Jonas)";
+  if (it && (it.internal || top.internal)) return " (nur Team)";
+  return " (sieht auch " + kundeName() + ")";
 }
 function cmtList(k, id) {
   const cs = cmtsOf(k, id);
@@ -427,7 +435,7 @@ function cmtList(k, id) {
         ${c.resolved_at ? "" : `<span class="r"><button type="button" class="lnk do" data-r="1" title="Als abgearbeitet markieren">${ICON_TICK}Abarbeiten</button></span>`}</div>
       <div class="b">${esc(c.body)}</div>
       ${c.resolved_at ? `<div class="rs"><span>abgearbeitet von ${esc(person(c.resolved_by))} · ${when(c.resolved_at)}</span><button type="button" class="lnk" data-r="0">wieder offen</button></div>` : ""}</div>`).join("") || `<div class="empty">Noch keine Kommentare</div>`}</div>
-    <div class="addsub"><input placeholder="Kommentar schreiben" aria-label="Kommentar schreiben"><button class="btn small" type="button">Senden</button></div></div>`;
+    <div class="addsub"><input placeholder="Kommentar schreiben${audience(k, id)}" aria-label="Kommentar schreiben"><button class="btn small" type="button">Senden</button></div></div>`;
 }
 function bindCmts(root, before) {
   root.querySelectorAll(".cmtbox").forEach((box) => {
@@ -620,8 +628,8 @@ function renderOverview(v) {
     const cb = document.createElement("div"); cb.className = "col"; cb.style.maxWidth = "900px";
     for (const c of oc.slice(0, 20)) {
       const it = c.item_id && S.items.find((x) => x.id === c.item_id), fb = c.feedback_id && S.feedback.find((x) => x.id === c.feedback_id);
-      if (!it && !fb) continue;
       const top = it && (it.parent_id ? S.items.find((x) => x.id === it.parent_id) : it);
+      if (it ? !top : !fb) continue;
       const label = it ? `#${top.nr} ${top.title}${it !== top ? " · " + it.title : ""}` : `Meldung #${fb.nr} ${fb.title}`;
       const row = document.createElement("div"); row.className = "orow" + (c.kind === "reopen" ? " reopen" : "");
       row.innerHTML = `<div class="h">${c.kind === "reopen" ? `<span class="tag ro">Wieder geöffnet</span>` : ""}<span>${esc(person(c.author))} · ${when(c.created_at)}</span><span class="r"><button type="button" class="lnk do" title="Als abgearbeitet markieren">${ICON_TICK}Abarbeiten</button></span></div>
@@ -630,6 +638,7 @@ function renderOverview(v) {
       row.querySelector(".lnk.do").onclick = () => resolveComment(c.id, true);
       cb.appendChild(row);
     }
+    if (oc.length > 20) cb.insertAdjacentHTML("beforeend", `<div class="note">Und ${oc.length - 20} weitere. Sie stehen an den Karten im Plan und im Feedback.</div>`);
     sc.appendChild(cb); v.appendChild(sc);
   }
 
@@ -858,12 +867,14 @@ function saveItem(t, patch, msg) {
   if (Object.keys(patch).length === 1 && patch.status) return tick(t, patch.status, "item.save", msg);
   return mutate(() => api("item.save", { data: { id: t.id, ...patch } }), msg);
 }
+const drop = (list, x) => { const i = list.indexOf(x); if (i >= 0) list.splice(i, 1); };
+const NEEDS_REASON = /begründen/;
 const PREVIEW_MSG = "Vorschau: hier wird nichts gespeichert. Oben wieder auf Team stellen.";
 // Speichern läuft der Reihe nach im Hintergrund, die Anzeige ist schon vorher richtig. Ein Neuladen, das währenddessen startet, wird verworfen
 function queue(call, revert) {
   edits++; pending++;
   saveQ = saveQ.then(call)
-    .catch((e) => { revert(); render(); if (e.message !== "401") toast("Nicht gespeichert: " + (e.message || "Fehler")); })
+    .catch((e) => { if (revert(e) === "handled") return; render(); if (e.message !== "401") toast("Nicht gespeichert: " + (e.message || "Fehler")); })
     .finally(() => { if (--pending) return; clearTimeout(queue.t); queue.t = setTimeout(() => { if (!pending && !busy && !typing()) refresh().catch(() => {}); }, 1200); });
 }
 const wasDone = (o, action) => action === "fb.save" ? FB_DONE.includes(o.status) : action === "item.save" && isDone(o);
@@ -875,19 +886,28 @@ function tick(o, status, action, msg) {
   doTick(o, status, action, msg);
 }
 function doTick(o, status, action, msg, reason) {
-  const prev = { status: o.status, done_by: o.done_by, done_at: o.done_at };
+  const snap = (x) => ({ status: x.status, done_by: x.done_by, done_at: x.done_at });
+  const prev = snap(o), reopen = wasDone(o, action) && !isDoneSt(status, action);
   o.status = status;
   if (action !== "ms.save") Object.assign(o, isDoneSt(status, action) ? { done_by: S.me.name, done_at: new Date().toISOString() } : { done_by: null, done_at: null });
+  // Unteraufgabe wieder offen: Hauptaufgabe ist dann auch nicht mehr fertig (macht der Server genauso)
+  const parent = reopen && action === "item.save" && o.parent_id && S.items.find((x) => x.id === o.parent_id && isDone(x));
+  const pPrev = parent && snap(parent);
+  if (parent) Object.assign(parent, { status: "Offen", done_by: null, done_at: null });
   const c = reason ? { id: "tmp" + Date.now(), [action === "fb.save" ? "feedback_id" : "item_id"]: o.id, author: S.me.name, body: reason, kind: "reopen", created_at: new Date().toISOString() } : null;
   if (c) S.comments.push(c);
   render(); toast(msg);
-  queue(() => api(action, { data: { id: o.id, status }, ...(reason ? { reason } : {}) }), () => { Object.assign(o, prev); if (c) S.comments.splice(S.comments.indexOf(c), 1); });
+  queue(() => api(action, { data: { id: o.id, status }, ...(reason ? { reason } : {}) }), (e) => {
+    Object.assign(o, prev); if (parent) Object.assign(parent, pPrev); if (c) drop(S.comments, c);
+    // Uhr weicht ab und der Server will doch einen Grund: dann direkt danach fragen statt nur zu scheitern
+    if (!reason && reopen && NEEDS_REASON.test(e.message || "")) { render(); askReason(o, action, (r) => doTick(o, status, action, "Wieder geöffnet", r)); return "handled"; }
+  });
 }
 function addComment(k, id, body) {
   if (previewAs) return toast(PREVIEW_MSG);
   const c = { id: "tmp" + Date.now(), [k]: id, author: S.me.name, body, kind: "kommentar", created_at: new Date().toISOString() };
   S.comments.push(c); render(); toast("Kommentar gespeichert");
-  queue(() => api("comment.add", { [k]: id, body }), () => S.comments.splice(S.comments.indexOf(c), 1));
+  queue(() => api("comment.add", { [k]: id, body }), () => drop(S.comments, c));
 }
 function resolveComment(id, resolved) {
   if (previewAs) return toast(PREVIEW_MSG);
@@ -912,8 +932,12 @@ function askReason(o, action, cb) {
 // Status im Formular von erledigt auf offen: auch hier mit Begründung
 function saveWithReason(o, action, data, msg) {
   const reopen = wasDone(o, action) && "status" in data && !isDoneSt(data.status, action) && !quickUndo(o);
-  if (!reopen) return mutate(() => api(action, { data }), msg);
-  askReason(o, action, (reason) => mutate(() => api(action, { data, reason }), "Wieder geöffnet"));
+  const withReason = () => askReason(o, action, (reason) => mutate(() => api(action, { data, reason }), "Wieder geöffnet"));
+  if (reopen) return withReason();
+  return mutate(async () => {
+    try { await api(action, { data }); if (msg) toast(msg); }
+    catch (e) { if (!NEEDS_REASON.test(e.message || "")) throw e; setTimeout(withReason); }
+  });
 }
 
 /* ---------- Formulare ---------- */
