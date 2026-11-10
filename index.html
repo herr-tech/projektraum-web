@@ -236,7 +236,32 @@ button.owners:hover { border-color: rgba(167,139,250,.55); }
 .drop.over { border-color: var(--lav); background: var(--lavbg); }
 .comments { display: grid; gap: 6px; }
 .cmt { background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 7px 9px; font-size: 13px; }
-.cmt .h { font-size: 11.5px; color: var(--faint); margin-bottom: 2px; }
+.cmt .h { font-size: 11.5px; color: var(--faint); margin-bottom: 2px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.cmt .h .r { margin-left: auto; }
+.cmt .rs { font-size: 11.5px; color: var(--faint); margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.cmt .b { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+.cmt.reopen { border-color: rgba(245,180,84,.45); }
+.cmt.resolved { opacity: .6; }
+.cmt.resolved .b { color: var(--soft); }
+.tag.ro { background: var(--amberbg); color: var(--amber); font-weight: 600; }
+.lnk { white-space: nowrap; border: 1px solid var(--line2); background: transparent; color: var(--soft); border-radius: 6px; padding: 1px 7px; font-size: 11.5px; }
+.lnk.on { border-color: rgba(94,224,160,.5); color: var(--green); }
+.lnk:hover { color: var(--ink); }
+.cbtn { border: 1px solid var(--line2); background: transparent; color: var(--faint); border-radius: 6px; padding: 1px 6px; font-size: 11.5px; display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.cbtn.has { color: var(--soft); }
+.cbtn.open { border-color: rgba(245,180,84,.5); color: var(--amber); background: var(--amberbg); font-weight: 600; }
+.by { font-size: 11.5px; color: var(--faint); }
+.subcmt { margin: 2px 0 6px 12px; display: grid; gap: 6px; }
+.subrow { flex-wrap: wrap; row-gap: 4px; }
+.subrow .t { flex: 1 1 140px; }
+.cmtbox { display: grid; gap: 6px; }
+.orow { display: grid; gap: 3px; padding: 8px 10px; border-radius: 9px; background: var(--bg); border: 1px solid var(--line); }
+.orow.reopen { border-color: rgba(245,180,84,.45); }
+.orow .h { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: 11.5px; color: var(--faint); }
+.orow .h .r { margin-left: auto; }
+.orow .b { font-size: 13px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.orow .tgt { border: 0; background: transparent; padding: 0; text-align: left; color: var(--lav2); font-size: 12.5px; }
+.orow .tgt:hover { text-decoration: underline; }
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); z-index: 40; display: grid; place-items: center; padding: 20px; }
 .lightbox img { max-width: 100%; max-height: 100%; border-radius: 8px; }
 
@@ -377,6 +402,40 @@ const msOf = (id) => S.milestones.find((m) => m.id === id);
 const areaOf = (id) => S.areas.find((a) => a.id === id);
 const mine = (list) => (list || []).includes(S.me.role === "kunde" ? "Livono" : S.me.name);
 const canTick = (i) => team() || (!i.internal && (i.who || []).includes("Livono"));
+const FB_DONE = ["Erledigt", "Kein Fehler"];
+const ICON_CMT = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>';
+const cmtsOf = (k, id) => S.comments.filter((c) => c[k] === id);
+const openCmts = (k, id) => cmtsOf(k, id).filter((c) => !c.resolved_at).length;
+const lastReopen = (k, id) => cmtsOf(k, id).filter((c) => c.kind === "reopen" && !c.resolved_at).pop();
+const when = (ts) => { if (!ts) return ""; const d = new Date(ts); return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }) + " " + d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }); };
+const person = (n) => { const p = S.people.find((x) => x.name === n); return p ? p.label.replace(/, Livono$/, "").split(" ")[0] : n; };
+// Den eigenen Haken kann man kurz ohne Begründung zurücknehmen (Server erlaubt 2 Minuten)
+const quickUndo = (o) => o.done_by === S.me.name && o.done_at && Date.now() - Date.parse(o.done_at) < 110000;
+// Während jemand tippt, nicht im Hintergrund neu zeichnen, sonst ist der Text weg
+const typing = () => [...document.querySelectorAll("#view input:not([type=checkbox])")].some((i) => i.value.trim() || i === document.activeElement);
+function cbtn(k, id, total) {
+  const o = openCmts(k, id), n = cmtsOf(k, id).length;
+  return `<button type="button" class="cbtn${o ? " open" : n ? " has" : ""}" aria-label="Kommentare${n ? ": " + n + ", davon " + o + " offen" : ""}" title="Kommentare">${ICON_CMT}${o ? o + " offen" : n ? n : total ? "Kommentar" : ""}</button>`;
+}
+function cmtList(k, id) {
+  const cs = cmtsOf(k, id);
+  return `<div class="cmtbox" data-k="${k}" data-id="${id}"><b>Kommentare</b><div class="comments">${cs.map((c) => `
+    <div class="cmt${c.kind === "reopen" ? " reopen" : ""}${c.resolved_at ? " resolved" : ""}" data-c="${c.id}">
+      <div class="h">${c.kind === "reopen" ? `<span class="tag ro">Wieder geöffnet</span>` : ""}<span>${esc(person(c.author))} · ${when(c.created_at)}</span>
+        ${c.resolved_at ? "" : `<span class="r"><button type="button" class="lnk on" data-r="1">Abgearbeitet</button></span>`}</div>
+      <div class="b">${esc(c.body)}</div>
+      ${c.resolved_at ? `<div class="rs"><span>abgearbeitet von ${esc(person(c.resolved_by))} · ${when(c.resolved_at)}</span><button type="button" class="lnk" data-r="0">wieder offen</button></div>` : ""}</div>`).join("") || `<div class="empty">Noch keine Kommentare</div>`}</div>
+    <div class="addsub"><input placeholder="Kommentar schreiben" aria-label="Kommentar schreiben"><button class="btn small" type="button">Senden</button></div></div>`;
+}
+function bindCmts(root, before) {
+  root.querySelectorAll(".cmtbox").forEach((box) => {
+    const k = box.dataset.k, id = box.dataset.id, inp = box.querySelector(".addsub input");
+    const go = () => { const v = inp.value.trim(); if (!v) return; inp.value = ""; if (before) before(box); addComment(k, id, v); };
+    box.querySelector(".addsub button").onclick = go;
+    inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } };
+    box.querySelectorAll("[data-r]").forEach((b) => b.onclick = () => resolveComment(b.closest(".cmt").dataset.c, b.dataset.r === "1"));
+  });
+}
 
 function visibleTops() {
   const q = $("q").value.trim().toLowerCase();
@@ -448,9 +507,13 @@ function itemCard(t, opts = {}) {
   if (opts.drag && team()) el.draggable = true;
   const key = "i:" + t.id, isOpen = open.has(key);
   el.dataset.item = t.id;
+  const ro = !done && lastReopen("item_id", t.id);
+  const subLine = (s) => { const r = !isDone(s) && lastReopen("item_id", s.id), co = open.has("c:" + s.id);
+    return `<div class="subrow${isDone(s) ? " done" : ""}" data-id="${s.id}"${isDone(s) && s.done_by ? ` title="Abgehakt von ${esc(person(s.done_by))} · ${esc(when(s.done_at))}"` : ""}>${chk(isDone(s), isDone(s) ? "Wieder öffnen" : "Abhaken", !canTick(s) && !isDone(s))}<button type="button" class="t subt">${esc(s.title)}</button>${r ? `<span class="tag ro">wieder offen</span>` : ""}${cbtn("item_id", s.id)}${whoChips(s.who)}${s.due ? `<span class="due${itemLate(s) ? " late" : ""}">${fmt(s.due)}</span>` : ""}</div>
+      ${co ? `<div class="subcmt">${cmtList("item_id", s.id)}</div>` : ""}`; };
   el.innerHTML = `
     <div class="crow">
-      ${chk(done, done ? "Wieder öffnen" : "Abhaken", !canTick(t))}
+      ${chk(done, done ? "Wieder öffnen" : "Abhaken", !canTick(t) && !done)}
       <button type="button" class="title">${esc(t.title)}</button>
       <button type="button" class="ibtn" aria-label="Details" aria-expanded="${isOpen}">${ICON_DOWN}</button>
     </div>
@@ -461,12 +524,14 @@ function itemCard(t, opts = {}) {
       ${opts.area && kindOf(t) !== "story" ? `<span class="tag k-${kindOf(t)}">${kindLabel(kindOf(t))}</span>` : ""}
       ${t.confidential ? `<span class="tag int">vertraulich</span>` : t.internal ? `<span class="tag int">nur Team</span>` : ""}
       ${t.status !== "Offen" && !done ? stPill(t.status) : ""}
+      ${ro ? `<span class="tag ro">wieder geöffnet von ${esc(person(ro.author))}</span>` : ""}
       ${whoChips(t.who)}
+      ${cbtn("item_id", t.id)}
+      ${done && t.done_by ? `<span class="by">erledigt von ${esc(person(t.done_by))} · ${when(t.done_at)}</span>` : ""}
       ${t.due ? `<span class="due${late ? " late" : ""}">${fmt(t.due)}</span>` : t.due_text ? `<span class="due">${esc(t.due_text)}</span>` : ""}
     </div>
     ${subs.length ? `<div class="prog"><div class="mbar${d === n ? " full" : ""}"><i style="width:${Math.round(d / n * 100)}%"></i></div>${d}/${n}</div>
-    <div class="subs">${subs.map((s) => `
-      <div class="subrow${isDone(s) ? " done" : ""}" data-id="${s.id}">${chk(isDone(s), isDone(s) ? "Wieder öffnen" : "Abhaken", !canTick(s))}<button type="button" class="t subt">${esc(s.title)}</button>${whoChips(s.who)}${s.due ? `<span class="due${itemLate(s) ? " late" : ""}">${fmt(s.due)}</span>` : ""}</div>`).join("")}</div>` : ""}
+    <div class="subs">${subs.map(subLine).join("")}</div>` : ""}
     <div class="info" ${isOpen ? "" : "hidden"}>
       ${t.descr ? `<div>${esc(t.descr)}</div>` : ""}
       ${(t.ac || []).length ? `<div><b>Abnahmekriterien:</b><ul class="acl">${t.ac.map((a) => `<li>${esc(a)}</li>`).join("")}</ul></div>` : ""}
@@ -474,20 +539,24 @@ function itemCard(t, opts = {}) {
       ${t.notes ? `<div><b>Hinweis:</b> ${esc(t.notes)}</div>` : ""}
       ${ms ? `<div><b>Meilenstein:</b> ${esc(ms.title)}${ms.due ? " · " + fmt(ms.due) : ""}</div>` : ""}
       ${team() && t.internal_note ? `<div class="intern"><b>Intern:</b> ${esc(t.internal_note)}</div>` : ""}
-      ${team() ? `<form class="addsub"><input placeholder="Unteraufgabe hinzufügen" aria-label="Unteraufgabe hinzufügen"><button class="btn small" type="submit">${ICON_PLUS}</button></form>` : ""}
+      ${team() ? `<form class="addsub newsub"><input placeholder="Unteraufgabe hinzufügen" aria-label="Unteraufgabe hinzufügen"><button class="btn small" type="submit">${ICON_PLUS}</button></form>` : ""}
+      ${cmtList("item_id", t.id)}
     </div>`;
   const info = el.querySelector(".info"), ib = el.querySelector(".ibtn");
   ib.onclick = () => { const o = info.hidden; info.hidden = !o; ib.setAttribute("aria-expanded", String(o)); o ? open.add(key) : open.delete(key); };
   el.querySelector(".title").onclick = () => team() ? openItem(t) : ib.click();
+  el.querySelector(".meta .cbtn").onclick = () => { if (info.hidden) ib.click(); const i = info.querySelector(".cmtbox input"); i.scrollIntoView({ block: "nearest" }); i.focus(); };
   const more = el.querySelector(".cstory .more");
   if (more) more.onclick = () => { const c = el.querySelector(".cstory"), on = !c.classList.contains("full"); c.classList.toggle("full", on); more.textContent = on ? "weniger" : "mehr"; on ? open.add("s:" + t.id) : open.delete("s:" + t.id); };
   el.querySelector(".crow .check").onclick = () => saveItem(t, { status: done ? "Offen" : "Erledigt" });
   el.querySelectorAll(".subrow").forEach((row) => {
     const s = S.items.find((x) => x.id === row.dataset.id);
     row.querySelector(".check").onclick = () => saveItem(s, { status: isDone(s) ? "Offen" : "Erledigt" });
-    row.querySelector(".subt").onclick = () => team() ? openSub(s, t) : null;
+    row.querySelector(".subt").onclick = () => team() ? openSub(s, t) : row.querySelector(".cbtn").click();
+    row.querySelector(".cbtn").onclick = () => { const k = "c:" + s.id; open.has(k) ? open.delete(k) : open.add(k); render(); const i = document.querySelector(`.subrow[data-id="${s.id}"] + .subcmt input`); if (i) i.focus(); };
   });
-  const add = el.querySelector(".addsub");
+  bindCmts(el, (box) => { if (!box.closest(".subcmt")) open.add(key); });
+  const add = el.querySelector(".newsub");
   if (add) add.onsubmit = async (e) => { e.preventDefault(); const v = add.querySelector("input").value.trim(); if (!v) return;
     await mutate(() => api("item.save", { data: { parent_id: t.id, area_id: t.area_id, title: v, who: t.who, due: t.due, sort: subs.length } }), "Unteraufgabe angelegt"); };
   if (el.draggable) { el.ondragstart = (e) => { e.dataTransfer.setData("text/plain", "i:" + t.id); el.classList.add("dragging"); }; el.ondragend = () => el.classList.remove("dragging"); }
@@ -542,6 +611,25 @@ function renderOverview(v) {
     box.appendChild(row);
   }
   s0.appendChild(box); v.appendChild(s0);
+
+  const oc = S.comments.filter((c) => !c.resolved_at).sort((a, b) => a.created_at < b.created_at ? 1 : -1);
+  if (oc.length) {
+    const sc = section("Offene Kommentare", "Neueste zuerst. Klick springt zur Aufgabe oder Meldung. Abgearbeitet setzen, wenn erledigt.");
+    const cb = document.createElement("div"); cb.className = "col"; cb.style.maxWidth = "900px";
+    for (const c of oc.slice(0, 20)) {
+      const it = c.item_id && S.items.find((x) => x.id === c.item_id), fb = c.feedback_id && S.feedback.find((x) => x.id === c.feedback_id);
+      if (!it && !fb) continue;
+      const top = it && (it.parent_id ? S.items.find((x) => x.id === it.parent_id) : it);
+      const label = it ? `#${top.nr} ${top.title}${it !== top ? " · " + it.title : ""}` : `Meldung #${fb.nr} ${fb.title}`;
+      const row = document.createElement("div"); row.className = "orow" + (c.kind === "reopen" ? " reopen" : "");
+      row.innerHTML = `<div class="h">${c.kind === "reopen" ? `<span class="tag ro">Wieder geöffnet</span>` : ""}<span>${esc(person(c.author))} · ${when(c.created_at)}</span><span class="r"><button type="button" class="lnk on">Abgearbeitet</button></span></div>
+        <button type="button" class="tgt">${esc(label.length > 110 ? label.slice(0, 108) + " …" : label)}</button><div class="b">${esc(c.body)}</div>`;
+      row.querySelector(".tgt").onclick = () => { if (fb) return jumpFb(fb.id); if (it !== top) open.add("c:" + it.id); jumpTo(top.id); };
+      row.querySelector(".lnk").onclick = () => resolveComment(c.id, true);
+      cb.appendChild(row);
+    }
+    sc.appendChild(cb); v.appendChild(sc);
+  }
 
   const s1 = section("Meilensteine", "Je Kalenderwoche. Daten sind unverbindliche Richtwerte.");
   const grid = document.createElement("div"); grid.className = "cols5";
@@ -630,19 +718,23 @@ function renderWeeks(v) {
 
 function fbCard(f) {
   const late = fbLate(f), done = !fbOpen(f), key = "f:" + f.id, isOpen = open.has(key);
-  const cs = S.comments.filter((c) => c.feedback_id === f.id);
+  const ro = !done && lastReopen("feedback_id", f.id);
   const el = document.createElement("article");
   el.className = "card fb" + (done ? " done" : "") + (late ? " late" : "");
+  el.dataset.fb = f.id;
   const shots = (f.screenshots || []).map((p) => S.urls[p] ? `<button type="button" class="shot" data-src="${esc(S.urls[p])}"><img src="${esc(S.urls[p])}" alt="Screenshot" loading="lazy"></button>` : `<span class="shot missing">Bild nicht verfügbar</span>`).join("");
   el.innerHTML = `
     <div class="crow">
-      ${team() ? chk(done, done ? "Wieder öffnen" : "Als erledigt markieren") : ""}
+      ${team() ? chk(done, done ? "Wieder öffnen" : "Als erledigt markieren") : done ? chk(true, "Wieder öffnen") : ""}
       <button type="button" class="title">${esc(f.title)}</button>
       <button type="button" class="ibtn" aria-label="Details" aria-expanded="${isOpen}">${ICON_DOWN}</button>
     </div>
     <div class="meta">
       <span class="nr">#${f.nr}</span><span class="sev ${f.severity}">${esc(f.severity)}</span>${stPill(f.status)}
-      <span>von ${esc(f.reporter)} · ${fmt(f.created_at.slice(0, 10))}</span>${whoChips(f.who)}
+      <span>von ${esc(person(f.reporter))} · ${fmt(f.created_at.slice(0, 10))}</span>${whoChips(f.who)}
+      ${ro ? `<span class="tag ro">wieder geöffnet von ${esc(person(ro.author))}</span>` : ""}
+      ${cbtn("feedback_id", f.id)}
+      ${done && f.done_by ? `<span class="by">erledigt von ${esc(person(f.done_by))}</span>` : ""}
       ${f.due ? `<span class="due${late ? " late" : ""}">${done ? "erledigt " + fmt((f.done_at || f.updated_at).slice(0, 10)) : "bis " + fmt(f.due)}</span>` : ""}
     </div>
     ${shots ? `<div class="shots">${shots}</div>` : ""}
@@ -650,17 +742,15 @@ function fbCard(f) {
       ${f.place ? `<div><b>Wo:</b> ${esc(f.place)}</div>` : ""}
       ${f.descr ? `<div style="white-space:pre-wrap">${esc(f.descr)}</div>` : ""}
       ${team() && f.internal_note ? `<div class="intern"><b>Intern:</b> ${esc(f.internal_note)}</div>` : ""}
-      <div><b>Kommentare</b><div class="comments">${cs.map((c) => `<div class="cmt"><div class="h">${esc(c.author)} · ${fmt(c.created_at.slice(0, 10))} ${c.created_at.slice(11, 16)}</div>${esc(c.body)}</div>`).join("") || `<div class="empty">Noch keine Kommentare</div>`}</div>
-      <form class="addsub"><input placeholder="Kommentar schreiben" aria-label="Kommentar"><button class="btn small" type="submit">Senden</button></form></div>
+      ${cmtList("feedback_id", f.id)}
     </div>`;
   const info = el.querySelector(".info"), ib = el.querySelector(".ibtn");
   ib.onclick = () => { const o = info.hidden; info.hidden = !o; ib.setAttribute("aria-expanded", String(o)); o ? open.add(key) : open.delete(key); };
   el.querySelector(".title").onclick = () => (team() || (f.reporter === S.me.name && f.status === "Offen")) ? openFb(f) : ib.click();
   const c = el.querySelector(".crow .check"); if (c) c.onclick = () => tick(f, done ? "Offen" : "Erledigt", "fb.save", done ? "Wieder offen" : "Als erledigt markiert");
   el.querySelectorAll(".shot[data-src]").forEach((b) => b.onclick = () => { $("lbImg").src = b.dataset.src; $("lightbox").hidden = false; });
-  const form = el.querySelector(".addsub");
-  form.onsubmit = async (e) => { e.preventDefault(); const v = form.querySelector("input").value.trim(); if (!v) return; open.add(key);
-    await mutate(() => api("comment.add", { feedback_id: f.id, body: v }), "Kommentar gespeichert"); };
+  el.querySelector(".meta .cbtn").onclick = () => { if (info.hidden) ib.click(); const i = info.querySelector(".cmtbox input"); i.scrollIntoView({ block: "nearest" }); i.focus(); };
+  bindCmts(el, () => open.add(key));
   return el;
 }
 
@@ -729,6 +819,15 @@ function jumpTo(id) {
   el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.add("flash");
   setTimeout(() => el.classList.remove("flash"), 2500);
 }
+function jumpFb(id) {
+  const f = S.feedback.find((x) => x.id === id); if (!f) return;
+  closeSheet(); who = null; chipsWho(); $("q").value = ""; if (!fbOpen(f)) $("hideDone").checked = false;
+  view = "feedback"; try { localStorage.setItem("pr-view", view); } catch (e) {}
+  open.add("f:" + id); render();
+  const el = document.querySelector(`.card[data-fb="${id}"]`); if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.add("flash");
+  setTimeout(() => el.classList.remove("flash"), 2500);
+}
 function setView(x) { view = x; try { localStorage.setItem("pr-view", x); } catch (e) {} if (x !== "plan") areaFilter = null; render(); window.scrollTo({ top: document.querySelector(".tools").offsetTop - 12, behavior: "smooth" }); }
 
 /* ---------- Speichern ---------- */
@@ -748,18 +847,71 @@ async function mutate(fn, msg) {
   finally { busy = false; }
 }
 function saveItem(t, patch, msg) {
-  if (!team()) { if (!canTick(t)) return toast("Diese Aufgabe liegt beim Team"); patch = { status: patch.status }; }
+  if (!team()) {
+    const reopen = isDone(t) && patch.status && patch.status !== "Erledigt";
+    if (!canTick(t) && !reopen) return toast("Diese Aufgabe liegt beim Team. Kommentieren geht immer");
+    patch = { status: patch.status };
+  }
   msg = msg || (patch.status === "Erledigt" ? "Erledigt" : patch.status ? "Wieder offen" : "Gespeichert");
   if (Object.keys(patch).length === 1 && patch.status) return tick(t, patch.status, "item.save", msg);
   return mutate(() => api("item.save", { data: { id: t.id, ...patch } }), msg);
 }
-// Abhaken sofort zeigen, Speichern läuft der Reihe nach im Hintergrund. Ein Neuladen, das während eines Klicks startet, wird verworfen, damit der Haken nicht zurückspringt
+const PREVIEW_MSG = "Vorschau: hier wird nichts gespeichert. Oben wieder auf Team stellen.";
+// Speichern läuft der Reihe nach im Hintergrund, die Anzeige ist schon vorher richtig. Ein Neuladen, das währenddessen startet, wird verworfen
+function queue(call, revert) {
+  edits++; pending++;
+  saveQ = saveQ.then(call)
+    .catch((e) => { revert(); render(); if (e.message !== "401") toast("Nicht gespeichert: " + (e.message || "Fehler")); })
+    .finally(() => { if (--pending) return; clearTimeout(queue.t); queue.t = setTimeout(() => { if (!pending && !busy && !typing()) refresh().catch(() => {}); }, 1200); });
+}
+const wasDone = (o, action) => action === "fb.save" ? FB_DONE.includes(o.status) : action === "item.save" && isDone(o);
+const isDoneSt = (st, action) => action === "fb.save" ? FB_DONE.includes(st) : st === "Erledigt";
+// Abhaken sofort zeigen. Wer Erledigtes wieder öffnet, muss sagen warum (außer beim eigenen Haken direkt danach)
 function tick(o, status, action, msg) {
-  if (previewAs) return toast("Vorschau: hier wird nichts gespeichert. Oben wieder auf Team stellen.");
-  const prev = o.status; o.status = status; edits++; pending++; render(); toast(msg);
-  saveQ = saveQ.then(() => api(action, { data: { id: o.id, status } }))
-    .catch((e) => { o.status = prev; render(); if (e.message !== "401") toast("Nicht gespeichert: " + (e.message || "Fehler")); })
-    .finally(() => { if (--pending) return; clearTimeout(tick.t); tick.t = setTimeout(() => { if (!pending && !busy) refresh().catch(() => {}); }, 1200); });
+  if (previewAs) return toast(PREVIEW_MSG);
+  if (wasDone(o, action) && !isDoneSt(status, action) && !quickUndo(o)) return askReason(o, action, (reason) => doTick(o, status, action, "Wieder geöffnet", reason));
+  doTick(o, status, action, msg);
+}
+function doTick(o, status, action, msg, reason) {
+  const prev = { status: o.status, done_by: o.done_by, done_at: o.done_at };
+  o.status = status;
+  if (action !== "ms.save") Object.assign(o, isDoneSt(status, action) ? { done_by: S.me.name, done_at: new Date().toISOString() } : { done_by: null, done_at: null });
+  const c = reason ? { id: "tmp" + Date.now(), [action === "fb.save" ? "feedback_id" : "item_id"]: o.id, author: S.me.name, body: reason, kind: "reopen", created_at: new Date().toISOString() } : null;
+  if (c) S.comments.push(c);
+  render(); toast(msg);
+  queue(() => api(action, { data: { id: o.id, status }, ...(reason ? { reason } : {}) }), () => { Object.assign(o, prev); if (c) S.comments.splice(S.comments.indexOf(c), 1); });
+}
+function addComment(k, id, body) {
+  if (previewAs) return toast(PREVIEW_MSG);
+  const c = { id: "tmp" + Date.now(), [k]: id, author: S.me.name, body, kind: "kommentar", created_at: new Date().toISOString() };
+  S.comments.push(c); render(); toast("Kommentar gespeichert");
+  queue(() => api("comment.add", { [k]: id, body }), () => S.comments.splice(S.comments.indexOf(c), 1));
+}
+function resolveComment(id, resolved) {
+  if (previewAs) return toast(PREVIEW_MSG);
+  const c = S.comments.find((x) => x.id === id); if (!c || String(id).startsWith("tmp")) return toast("Einen Moment, wird noch gespeichert");
+  const prev = { resolved_at: c.resolved_at, resolved_by: c.resolved_by };
+  Object.assign(c, resolved ? { resolved_at: new Date().toISOString(), resolved_by: S.me.name } : { resolved_at: null, resolved_by: null });
+  render(); toast(resolved ? "Abgearbeitet" : "Wieder offen");
+  queue(() => api("comment.resolve", { id, resolved }), () => Object.assign(c, prev));
+}
+function askReason(o, action, cb) {
+  const f = $("form"); editing = o;
+  const what = action === "fb.save" ? "Meldung" : "Aufgabe";
+  f.innerHTML = `<h3>${what} wieder öffnen</h3><div class="note">${esc(o.title)}</div>
+    <div class="field"><label for="rWhy">Warum ist es noch nicht fertig? Was fehlt oder geht nicht?</label><textarea id="rWhy" rows="4"></textarea></div>
+    <div class="note">Der Grund steht danach mit deinem Namen als Kommentar an der ${what}. Wer ihn erledigt hat, setzt ihn auf abgearbeitet.</div>
+    <div class="actions"><button class="btn" type="submit">Wieder öffnen</button><button class="btn ghost" type="button" id="rCancel">Abbrechen</button></div>
+    <div class="err" id="fErr"></div>`;
+  $("rCancel").onclick = closeSheet;
+  f.onsubmit = (e) => { e.preventDefault(); const r = val("rWhy"); if (!r) { $("fErr").textContent = "Bitte kurz begründen."; return; } closeSheet(); cb(r); };
+  $("sheet").hidden = false; $("rWhy").focus();
+}
+// Status im Formular von erledigt auf offen: auch hier mit Begründung
+function saveWithReason(o, action, data, msg) {
+  const reopen = wasDone(o, action) && "status" in data && !isDoneSt(data.status, action) && !quickUndo(o);
+  if (!reopen) return mutate(() => api(action, { data }), msg);
+  askReason(o, action, (reason) => mutate(() => api(action, { data, reason }), "Wieder geöffnet"));
 }
 
 /* ---------- Formulare ---------- */
@@ -806,7 +958,8 @@ function openItem(t, defaults = {}) {
     if (fullTeam()) data.confidential = $("fConf").checked;
     if (!data.title) { $("fErr").textContent = "Bitte eine Aufgabe eintragen."; return; }
     if (t) data.id = t.id;
-    closeSheet(); await mutate(() => api("item.save", { data }), t ? "Gespeichert" : "Aufgabe angelegt");
+    closeSheet(); if (t) return saveWithReason(t, "item.save", data, "Gespeichert");
+    await mutate(() => api("item.save", { data }), "Aufgabe angelegt");
   };
   $("sheet").hidden = false; $("fTitle").focus();
 }
@@ -921,7 +1074,8 @@ function openFb(f) {
     if (!data.screenshots.length) { $("fErr").textContent = "Bitte mindestens einen Screenshot anhängen."; return; }
     if (isTeam) Object.assign(data, { status: val("bStatus"), due: val("bDue") || null, who: pickedWho(), internal_note: val("bInt") });
     if (f) data.id = f.id;
-    closeSheet(); await mutate(() => api("fb.save", { data }), f ? "Gespeichert" : "Danke, Meldung ist angekommen");
+    closeSheet(); if (f) return saveWithReason(f, "fb.save", data, "Gespeichert");
+    await mutate(() => api("fb.save", { data }), "Danke, Meldung ist angekommen");
   };
   $("sheet").hidden = false; $("bTitle").focus();
 }
@@ -936,7 +1090,7 @@ function showPreview() {
 const ROLE_TEXT = {
   team: ["Alles, auch interne Aufgaben und Notizen, Raten an den Meilensteinen und die Rechnungsaufgaben", "Alles: Aufgaben, Unteraufgaben, Zuordnung, Ansprechpartner der Bereiche, Meilensteine mit Raten, Feedback erledigen, löschen"],
   partner: ["Alles wie das Team, nur keine Kosten: keine Raten an den Meilensteinen, keine Rechnungsaufgaben", "Aufgaben, Unteraufgaben, Zuordnung, Ansprechpartner der Bereiche, Meilensteine ohne Raten, Feedback erledigen. Keine Meilensteine löschen"],
-  kunde: ["Alle Aufgaben außer „nur Team“, ohne interne Notizen. Raten an den Meilensteinen ja, Rechnungsaufgaben nein", "Eigene Aufgaben und Unteraufgaben (Livono) abhaken, Fehler mit Screenshot melden, eigene offene Meldungen bearbeiten, kommentieren"],
+  kunde: ["Alle Aufgaben außer „nur Team“, ohne interne Notizen. Raten an den Meilensteinen ja, Rechnungsaufgaben nein", "Eigene Aufgaben und Unteraufgaben (Livono) abhaken, alles Sichtbare kommentieren, Erledigtes mit Begründung wieder öffnen, Kommentare abarbeiten, Fehler mit Screenshot melden, eigene offene Meldungen bearbeiten"],
 };
 function openWhoSees() {
   const f = $("form");
@@ -962,7 +1116,7 @@ function openSub(s, parent) {
   bindWho(); $("sCancel").onclick = closeSheet;
   $("sDel").onclick = async () => { if (!confirm("Unteraufgabe löschen?")) return; closeSheet(); await mutate(() => api("item.delete", { id: s.id }), "Gelöscht"); };
   f.onsubmit = async (e) => { e.preventDefault(); const title = val("sTitle"); if (!title) { $("fErr").textContent = "Bitte einen Titel eintragen."; return; }
-    closeSheet(); await mutate(() => api("item.save", { data: { id: s.id, title, who: pickedWho(), status: val("sStatus"), due: val("sDue") || null } }), "Gespeichert"); };
+    closeSheet(); saveWithReason(s, "item.save", { id: s.id, title, who: pickedWho(), status: val("sStatus"), due: val("sDue") || null }, "Gespeichert"); };
   $("sheet").hidden = false; $("sTitle").focus();
 }
 
@@ -986,7 +1140,7 @@ $("q").oninput = render; $("hideDone").onchange = () => { try { localStorage.set
     $("whoSees").onclick = openWhoSees;
   }
   $("login").hidden = true; $("app").hidden = false; chipsWho(); chipsKind(); render();
-  setInterval(() => { if (!document.hidden && $("sheet").hidden && !busy) refresh().catch(() => {}); }, 30000);
+  setInterval(() => { if (!document.hidden && $("sheet").hidden && !busy && !pending && !typing()) refresh().catch(() => {}); }, 30000);
 })();
 </script>
 </body>
