@@ -323,7 +323,7 @@ const ICON_DOWN = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" s
 const ICON_PLUS = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
 
 let previewAs = null, realRole = null;
-let TOKEN = null, S = null, view = "overview", who = null, areaFilter = null, busy = false, editing = null, pendingShots = [];
+let TOKEN = null, S = null, view = "overview", who = null, areaFilter = null, busy = false, editing = null, pendingShots = [], pending = 0, edits = 0, saveQ = Promise.resolve();
 const open = new Set();
 const KINDS = [["story", "User Story", "User Storys"], ["orga", "Orga", "Orga"], ["abnahme", "Abnahme", "Abnahme"]];
 const kindOf = (t) => t.kind || (t.story ? "story" : "orga");
@@ -502,7 +502,7 @@ function msCard(m) {
   el.innerHTML = `<div class="crow">${chk(reached, reached ? "Wieder öffnen" : "Als erreicht abhaken", !team())}<button type="button" class="title">${esc(m.title)}</button></div>
     <div class="meta"><span class="dia"></span><b class="${late ? "due late" : ""}" style="font-variant-numeric:tabular-nums">${m.due ? fmt(m.due) : esc(m.due_text || "offen")}</b>${m.status === "In Arbeit" ? stPill("In Arbeit") : ""}${m.payment ? `<span class="pay">${esc(m.payment)}</span>` : ""}${whoChips(m.who)}</div>
     ${items.length ? `<div class="prog"><div class="mbar${d === items.length ? " full" : ""}"><i style="width:${Math.round(d / items.length * 100)}%"></i></div>${d}/${items.length}</div>` : ""}`;
-  el.querySelector(".check").onclick = () => mutate(() => api("ms.save", { data: { id: m.id, status: reached ? "Offen" : "Erreicht" } }), reached ? "Wieder offen" : "Meilenstein erreicht");
+  el.querySelector(".check").onclick = () => tick(m, reached ? "Offen" : "Erreicht", "ms.save", reached ? "Wieder offen" : "Meilenstein erreicht");
   el.querySelector(".title").onclick = () => openMs(m);
   return el;
 }
@@ -656,7 +656,7 @@ function fbCard(f) {
   const info = el.querySelector(".info"), ib = el.querySelector(".ibtn");
   ib.onclick = () => { const o = info.hidden; info.hidden = !o; ib.setAttribute("aria-expanded", String(o)); o ? open.add(key) : open.delete(key); };
   el.querySelector(".title").onclick = () => (team() || (f.reporter === S.me.name && f.status === "Offen")) ? openFb(f) : ib.click();
-  const c = el.querySelector(".crow .check"); if (c) c.onclick = () => mutate(() => api("fb.save", { data: { id: f.id, status: done ? "Offen" : "Erledigt" } }), done ? "Wieder offen" : "Als erledigt markiert");
+  const c = el.querySelector(".crow .check"); if (c) c.onclick = () => tick(f, done ? "Offen" : "Erledigt", "fb.save", done ? "Wieder offen" : "Als erledigt markiert");
   el.querySelectorAll(".shot[data-src]").forEach((b) => b.onclick = () => { $("lbImg").src = b.dataset.src; $("lightbox").hidden = false; });
   const form = el.querySelector(".addsub");
   form.onsubmit = async (e) => { e.preventDefault(); const v = form.querySelector("input").value.trim(); if (!v) return; open.add(key);
@@ -740,7 +740,7 @@ function normalize(d) {
   return d;
 }
 async function load() { return normalize(await api("load", previewAs ? { as: previewAs } : {})); }
-async function refresh() { S = await load(); render(); }
+async function refresh() { const e = edits; const d = await load(); if (e !== edits || pending) return; S = d; render(); }
 async function mutate(fn, msg) {
   if (busy) return; busy = true;
   try { await fn(); if (msg) toast(msg); await refresh(); }
@@ -749,7 +749,17 @@ async function mutate(fn, msg) {
 }
 function saveItem(t, patch, msg) {
   if (!team()) { if (!canTick(t)) return toast("Diese Aufgabe liegt beim Team"); patch = { status: patch.status }; }
-  return mutate(() => api("item.save", { data: { id: t.id, ...patch } }), msg || (patch.status === "Erledigt" ? "Erledigt" : patch.status ? "Wieder offen" : "Gespeichert"));
+  msg = msg || (patch.status === "Erledigt" ? "Erledigt" : patch.status ? "Wieder offen" : "Gespeichert");
+  if (Object.keys(patch).length === 1 && patch.status) return tick(t, patch.status, "item.save", msg);
+  return mutate(() => api("item.save", { data: { id: t.id, ...patch } }), msg);
+}
+// Abhaken sofort zeigen, Speichern läuft der Reihe nach im Hintergrund. Ein Neuladen, das während eines Klicks startet, wird verworfen, damit der Haken nicht zurückspringt
+function tick(o, status, action, msg) {
+  if (previewAs) return toast("Vorschau: hier wird nichts gespeichert. Oben wieder auf Team stellen.");
+  const prev = o.status; o.status = status; edits++; pending++; render(); toast(msg);
+  saveQ = saveQ.then(() => api(action, { data: { id: o.id, status } }))
+    .catch((e) => { o.status = prev; render(); if (e.message !== "401") toast("Nicht gespeichert: " + (e.message || "Fehler")); })
+    .finally(() => { if (--pending) return; clearTimeout(tick.t); tick.t = setTimeout(() => { if (!pending && !busy) refresh().catch(() => {}); }, 1200); });
 }
 
 /* ---------- Formulare ---------- */
